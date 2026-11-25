@@ -1,0 +1,51 @@
+{
+  "name": "kurgu-studio",
+  "productName": "Kurgu Studio",
+  "version": "1.0.0",
+  "description": "Premiere Pro ve DaVinci Resolve'dan esinlenen hafif, masaüstü video editörü",
+  "main": "main.js",
+  "author": "gelistirici-user",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "serve": "node scripts/serve.js",
+    "vendor": "node scripts/vendor.js",
+    "dist": "npm run vendor && electron-builder --win portable nsis"
+  },
+  "build": {
+    "appId": "com.kurgustudio.app",
+    "productName": "Kurgu Studio",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "KurguStudio-Portable-${version}.exe"
+    },
+    "fileAssociations": [
+      {
+        "ext": "kurgu",
+        "name": "Kurgu Studio Projesi"
+      }
+    ]
+  },
+  "dependencies": {
+    "mediabunny": "^1.66.4"
+  },
+  "devDependencies": {
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0"
+  }
+}
