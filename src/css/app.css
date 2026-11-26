@@ -399,3 +399,15 @@ kbd { font: 11px var(--mono); background: var(--bg0); border: 1px solid var(--li
 .asr-preview { max-height: 180px; overflow: auto; margin-top: 10px; font-size: 12px; line-height: 1.5; color: var(--tx1); background: var(--bg0); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
 .asr-preview:empty { display: none; }
 .asr-preview b { color: var(--acc2); font: 600 11px var(--mono); }
+
+/* renk sayfası: çarklar, eğriler */
+.wheels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.wheel-box { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.wheel-l { font-size: 11px; color: var(--tx2); }
+.wheel { cursor: crosshair; max-width: 100%; height: auto !important; aspect-ratio: 1; }
+.wheel-box .slider { width: 100%; }
+.curve-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 6px; }
+.curve { display: block; width: 100% !important; height: auto !important; aspect-ratio: 4 / 3; border: 1px solid var(--line); border-radius: 4px; cursor: crosshair; }
+.lut-name { font-size: 12px; color: var(--tx2); align-self: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-row.tight { margin: 0; align-items: center; }
+.frame.picking, .frame.picking * { cursor: crosshair !important; }

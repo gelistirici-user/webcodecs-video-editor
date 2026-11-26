@@ -5,6 +5,8 @@ import { icon, scrubNumber, toast, contextMenu } from './ui.js';
 import { valueAt, hasKf, kfAt, upsertKf, removeKf, clearKf, neighborKf, getPath, setPath, anyKf, EASINGS } from './keyframes.js';
 import { TRANSITIONS, COLOR_PRESETS, ANIMATIONS, BLENDS } from './compositor.js';
 import { DEFAULT_AFX } from './audiofx.js';
+import { wheel, curveEditor, lutControls, keyControls, ensureGrade } from './colorui.js';
+import { DEFAULT_GRADE } from './fxgl.js';
 import { normalizeSelected } from './tools.js';
 
 const FONTS = ['Segoe UI', 'Arial', 'Arial Black', 'Bahnschrift', 'Calibri', 'Cambria', 'Candara', 'Comic Sans MS', 'Consolas', 'Constantia', 'Corbel', 'Courier New', 'Georgia', 'Impact', 'Lucida Console', 'Palatino Linotype', 'Segoe Print', 'Segoe Script', 'Tahoma', 'Times New Roman', 'Trebuchet MS', 'Verdana'];
@@ -63,13 +65,17 @@ export class Inspector {
       h('span', { class: 'insp-sub' }, tracks.map((t) => t.name).join(' + '))));
 
     this.timingSection(main, sel);
-    if (this.page === 'color' && vClip) { this.colorSection(vClip); }
+    if (this.page === 'color' && vClip) {
+      this.colorSection(vClip);
+      if (vClip.type === 'media') this.gradeSections(vClip);
+    }
     if (vClip) {
       if (vClip.type === 'text') this.textSection(vClip);
       if (vClip.type === 'color') this.fillSection(vClip);
       this.motionSection(vClip);
       this.opacitySection(vClip);
       if (this.page !== 'color') this.colorSection(vClip);
+      if (this.page !== 'color' && vClip.type === 'media') this.section('key', 'Chroma Key (yeşil perde)', (b) => keyControls(this, b, vClip, (cb) => this.pickColor?.(cb)));
       this.animSection(vClip);
       this.transitionSection(vClip);
     }
@@ -318,6 +324,21 @@ export class Inspector {
       this.numRow(b, 'Vinyet', { kf: { clip: c, path: 'color.vignette' }, get: () => C.vignette, set: (v) => (C.vignette = v), min: 0, max: 1, step: 0.5, def: 0, display: (v) => v * 100, parse: (v) => v / 100 });
       this.numRow(b, 'Bulanıklık', { kf: { clip: c, path: 'color.blur' }, get: () => C.blur, set: (v) => (C.blur = v), min: 0, max: 30, step: 0.1, decimals: 1, suffix: ' px', def: 0 });
     }, { onReset: () => { this.once('Rengi sıfırla', () => Object.assign(C, DEFAULT_COLOR())); this.build(); } });
+  }
+
+  // Renk sayfası: GPU renk motoru denetimleri
+  gradeSections(c) {
+    const resetGrade = (keys, label) => () => { this.once(label, () => { const d = DEFAULT_GRADE(); const g = ensureGrade(c); keys.forEach((k) => { g[k] = d[k]; }); }); };
+    this.section('wheels', 'Renk Çarkları', (b) => {
+      const row = h('div', { class: 'wheels' });
+      wheel(this, row, c, 'lift', 'Gölgeler');
+      wheel(this, row, c, 'gamma', 'Orta tonlar');
+      wheel(this, row, c, 'gain', 'Parlak alanlar');
+      b.append(row, h('p', { class: 'hint' }, 'Çarkta sürükleyin (Shift: ince ayar), alttaki kaydırıcı parlaklık. Çift tık sıfırlar.'));
+    }, { onReset: resetGrade(['lift', 'gamma', 'gain'], 'Çarkları sıfırla') });
+    this.section('curves', 'Eğriler', (b) => curveEditor(this, b, c), { onReset: resetGrade(['curves'], 'Eğrileri sıfırla') });
+    this.section('lut', 'LUT', (b) => lutControls(this, b, c));
+    this.section('key', 'Chroma Key (yeşil perde)', (b) => keyControls(this, b, c, (cb) => this.pickColor?.(cb)));
   }
 
   textSection(c) {

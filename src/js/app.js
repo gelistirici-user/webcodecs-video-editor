@@ -1255,6 +1255,28 @@ else window.addEventListener('beforeunload', (e) => { if (store.dirty && store.p
 // dışarıdan erişim (zaman çizelgesi bağlam menüsü için)
 window.kurgu = { importFiles, splitAtPlayhead, cut, copy, paste, duplicate, deleteSelection, speedDialog, addMarker, toggleClipEnabled, store, player, timeline };
 
+// monitörden renk seçme (chroma key)
+inspector.pickColor = (cb) => {
+  if (monMode !== 'program') setMonitor('program');
+  toast('Monitörde anahtar rengine tıklayın (Esc: vazgeç)', 'info', 3000);
+  frame.classList.add('picking');
+  const done = () => { frame.classList.remove('picking'); frame.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey, true); };
+  const onDown = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const r = programCanvas.getBoundingClientRect();
+    const x = Math.floor(((e.clientX - r.left) / r.width) * programCanvas.width), y = Math.floor(((e.clientY - r.top) / r.height) * programCanvas.height);
+    const d = programCanvas.getContext('2d').getImageData(clamp(x - 2, 0, programCanvas.width - 5), clamp(y - 2, 0, programCanvas.height - 5), 5, 5).data;
+    let rr = 0, gg = 0, bb = 0;
+    for (let i = 0; i < d.length; i += 4) { rr += d[i]; gg += d[i + 1]; bb += d[i + 2]; }
+    const n = d.length / 4, hex = '#' + [rr, gg, bb].map((v) => Math.round(v / n).toString(16).padStart(2, '0')).join('');
+    done();
+    cb(hex);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(); } };
+  frame.addEventListener('pointerdown', onDown, true);
+  window.addEventListener('keydown', onKey, true);
+};
+
 // GPU sıfırlanırsa (sürücü zaman aşımı, uykudan dönüş) GPU tuvallerinin içeriği silinir: yeniden çiz
 for (const c of [$('#programCanvas'), $('.tl-canvas'), $('.tl-ruler'), $('#scopeCanvas')]) {
   c?.addEventListener('contextrestored', () => { player.requestRender(); timeline.request(); scopes.update(true); });

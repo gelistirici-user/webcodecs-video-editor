@@ -2,6 +2,7 @@
 import { clamp, smooth, EPS } from './utils.js';
 import { animated, valueAt } from './keyframes.js';
 import { srcTimeAt } from './timemap.js';
+import { applyGrade, gradeActive } from './fxgl.js';
 
 export const TRANSITIONS = {
   dissolve: 'Çapraz Geçiş',
@@ -278,8 +279,14 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
         const sx = src.w * tr.cropL, sy = src.h * tr.cropT;
         const sw = src.w * (1 - tr.cropL - tr.cropR), sh = src.h * (1 - tr.cropT - tr.cropB);
         if (sw > 1 && sh > 1) {
+          // GPU renk motoru (eğriler, çarklar, LUT, chroma key)
+          let el = src.el, fx = 1;
+          if (gradeActive(clip.grade)) {
+            const gc = applyGrade(src.el, src.w, src.h, clip.grade, (id) => (project.luts || []).find((l) => l.id === id));
+            if (gc) { el = gc; fx = gc.width / src.w; }
+          }
           try {
-            target.drawImage(src.el, sx, sy, sw, sh, -dw / 2 + dw * tr.cropL, -dh / 2 + dh * tr.cropT, dw * (1 - tr.cropL - tr.cropR), dh * (1 - tr.cropT - tr.cropB));
+            target.drawImage(el, sx * fx, sy * fx, sw * fx, sh * fx, -dw / 2 + dw * tr.cropL, -dh / 2 + dh * tr.cropT, dw * (1 - tr.cropL - tr.cropR), dh * (1 - tr.cropT - tr.cropB));
           } catch { /* kaynak hazır değil */ }
         }
       }
