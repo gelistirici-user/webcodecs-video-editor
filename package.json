@@ -39,13 +39,13 @@
         "ext": "kurgu",
         "name": "Kurgu Studio Projesi"
       }
-    ]
-  },
-  "dependencies": {
-    "mediabunny": "^1.66.4"
+    ],
+    "compression": "maximum",
+    "asar": true
   },
   "devDependencies": {
     "electron": "^45.5.0",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "mediabunny": "^1.66.4"
   }
 }
