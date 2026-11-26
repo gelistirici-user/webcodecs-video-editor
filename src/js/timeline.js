@@ -35,7 +35,7 @@ export class Timeline {
     this.ghost = null;
     this._queued = false;
     this.bind();
-    store.on('change', () => { this.buildHeaders(); this.request(); });
+    store.on('change', (d) => { if (!d?.live) this.buildHeaders(); this.request(); });
     store.on('selection', () => this.request());
     store.on('playhead', () => { this.followPlayhead(); this.request(); });
     store.on('media-cache', () => this.request());

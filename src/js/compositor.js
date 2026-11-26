@@ -57,7 +57,7 @@ export function layersAt(project, t, mediaById) {
   const vtracks = project.tracks.filter((tr) => tr.kind === 'video');
   for (const track of vtracks) {
     if (track.hidden) continue;
-    const clips = project.clips.filter((c) => c.trackId === track.id).sort((a, b) => a.start - b.start);
+    const clips = project.clips.filter((c) => c.trackId === track.id && !c.muted).sort((a, b) => a.start - b.start);
     let handled = false;
     // geçişler
     for (let i = 0; i < clips.length; i++) {
@@ -94,7 +94,7 @@ export function layersAt(project, t, mediaById) {
       break;
     }
     if (handled) continue;
-    const c = clips.find((k) => t >= k.start - EPS && t < k.start + k.duration - EPS);
+    const c = clips.find((k) => !k.muted && t >= k.start - EPS && t < k.start + k.duration - EPS);
     if (c) layers.push({ clip: c, track, srcTime: mediaTime(c, t, mediaById.get(c.mediaId)), alpha: 1 });
   }
   return layers;

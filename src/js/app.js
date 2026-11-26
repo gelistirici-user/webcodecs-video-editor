@@ -178,7 +178,7 @@ function updateTimecodes() {
   }
 }
 store.on('playhead', updateTimecodes);
-store.on('change', () => { updateTimecodes(); updateTitle(); scheduleAutosave(); updateUndoButtons(); });
+store.on('change', (d) => { updateTimecodes(); if (d?.live) return; updateTitle(); scheduleAutosave(); updateUndoButtons(); });
 store.on('transport', (playing) => {
   $('#tPlay').innerHTML = icon(playing ? 'pause' : 'play', 22);
   $('#tPlay').setAttribute('aria-label', playing ? 'Duraklat' : 'Oynat');
@@ -315,7 +315,8 @@ function renderMediaList() {
     list.append(card);
   }
 }
-store.on('change', debounce(renderMediaList, 60));
+const renderMediaListDeb = debounce(renderMediaList, 60);
+store.on('change', (d) => { if (!d?.live) renderMediaListDeb(); });
 store.on('media-cache', debounce(renderMediaList, 200));
 store.on('load', () => { buildMediaPanel(); store.project.media.forEach((m) => buildCache(m)); });
 
@@ -767,7 +768,8 @@ function toggleClipEnabled() {
   const sel = store.selectedClips();
   if (!sel.length) return;
   const v = !sel[0].muted;
-  store.transact(v ? 'Klibi devre dışı bırak' : 'Klibi etkinleştir', () => sel.forEach((c) => { c.muted = v; c.transform.opacity = v ? 0 : (c.transform.opacity || 1); }));
+  store.transact(v ? 'Klibi devre dışı bırak' : 'Klibi etkinleştir', () => sel.forEach((c) => { c.muted = v; }));
+  status(v ? 'Klip devre dışı (görüntü/ses çıkmaz)' : 'Klip etkin');
 }
 function speedDialog() {
   const sel = store.selectedClips();
