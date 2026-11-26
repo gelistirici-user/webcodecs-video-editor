@@ -4,6 +4,7 @@ import { thumbAt } from './media.js';
 import { clamp, formatTC, EPS, uid, h } from './utils.js';
 import { icon, contextMenu, toast, promptDialog } from './ui.js';
 import { TRANSITIONS, COLOR_PRESETS, ANIMATIONS } from './compositor.js';
+import { kfTimes } from './keyframes.js';
 
 export const drag = { payload: null }; // panelden sürüklenen öğe
 const RULER_H = 30;
@@ -409,6 +410,17 @@ export class Timeline {
     ctx.roundRect(x + (sel ? 1 : 0.5), y + (sel ? 1 : 0.5), w - (sel ? 2 : 1), hh - (sel ? 2 : 1), 4);
     ctx.stroke();
     if (lockedTrack) { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x, y, w, hh); }
+    // anahtar kareler (klibin altında elmaslar)
+    if (c.kf) {
+      const ky = y + hh - 6;
+      ctx.lineWidth = 1;
+      for (const tt of kfTimes(c)) {
+        const kx = Math.round(this.t2x(tt)) + 0.5;
+        ctx.beginPath(); ctx.moveTo(kx, ky - 4); ctx.lineTo(kx + 4, ky); ctx.lineTo(kx, ky + 4); ctx.lineTo(kx - 4, ky); ctx.closePath();
+        ctx.fillStyle = sel ? '#ffd34d' : 'rgba(255,211,77,0.55)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.stroke();
+      }
+    }
 
     // fade tutamaçları (üzerine gelince)
     if (this.hover?.clip?.id === c.id && !this.op && this.tool === 'select' && w > 30) {

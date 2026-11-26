@@ -246,6 +246,19 @@ input[type=number].inp { -moz-appearance: textfield; }
 .prow.two > select, .prow.two > input:not([type=color]) { justify-self: stretch; }
 .prow.check { cursor: pointer; }
 .prow:has(.punit) { grid-template-columns: 92px 1fr 62px 46px; }
+.prow.has-kf { grid-template-columns: 84px 1fr 58px 44px; }
+.prow.has-kf:has(.punit) { grid-template-columns: 84px 1fr 58px 40px 44px; }
+.kf-ctl { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0; }
+.kf-nav { width: 14px; height: 20px; display: grid; place-items: center; color: var(--tx2); border-radius: 3px; padding: 0; }
+.kf-nav svg { transform: rotate(90deg); }
+.kf-nav.next svg { transform: rotate(-90deg); }
+.kf-nav:disabled { opacity: .25; cursor: default; }
+.kf-nav:not(:disabled):hover { color: var(--tx0); background: var(--bg3); }
+.kf-dia { width: 16px; height: 20px; position: relative; padding: 0; }
+.kf-dia::before { content: ''; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; transform: translate(-50%,-50%) rotate(45deg); border: 1.5px solid var(--tx3); border-radius: 1px; }
+.kf-dia:hover::before { border-color: var(--tx0); }
+.kf-dia.anim::before { border-color: var(--acc2); }
+.kf-dia.on::before { background: var(--acc2); border-color: var(--acc2); }
 .plabel { color: var(--tx2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
 .plabel[title]:not([title=""]) { cursor: help; }
 .punit { color: var(--tx3); font: 10.5px var(--mono); text-align: right; }

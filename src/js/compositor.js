@@ -1,5 +1,6 @@
 // Kare birleştirici: hem önizleme hem dışa aktarma aynı kodu kullanır (ne görüyorsan o çıkar)
 import { clamp, smooth, EPS } from './utils.js';
+import { animated, valueAt } from './keyframes.js';
 
 export const TRANSITIONS = {
   dissolve: 'Çapraz Geçiş',
@@ -225,7 +226,7 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
       ctx.restore();
       continue;
     }
-    const clip = L.clip;
+    const clip = animated(L.clip, t);
     const tr = clip.transform;
     const col = clip.color;
     const an = animState(clip, t);
@@ -323,7 +324,7 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
 // Ses kazancı: klip sesi + ses geçişleri
 export function audioGain(clip, t) {
   if (clip.muted) return 0;
-  let g = clip.volume;
+  let g = valueAt(clip, 'volume', t);
   const local = t - clip.start;
   if (clip.audioFadeIn > 0) g *= clamp(local / clip.audioFadeIn, 0, 1);
   if (clip.audioFadeOut > 0) g *= clamp((clip.duration - local) / clip.audioFadeOut, 0, 1);

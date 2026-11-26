@@ -1,7 +1,8 @@
 // Denetçi paneli: seçili klibin özellikleri (Hareket, Opaklık, Renk, Metin, Ses, Hız, Geçiş)
 import { store, DEFAULT_TRANSFORM, DEFAULT_COLOR } from './store.js';
 import { h, formatTC, parseTC, clamp } from './utils.js';
-import { icon, scrubNumber, toast } from './ui.js';
+import { icon, scrubNumber, toast, contextMenu } from './ui.js';
+import { valueAt, hasKf, kfAt, upsertKf, removeKf, clearKf, neighborKf, getPath, setPath, anyKf, EASINGS } from './keyframes.js';
 import { TRANSITIONS, COLOR_PRESETS, ANIMATIONS, BLENDS } from './compositor.js';
 
 const FONTS = ['Segoe UI', 'Arial', 'Arial Black', 'Bahnschrift', 'Calibri', 'Cambria', 'Candara', 'Comic Sans MS', 'Consolas', 'Constantia', 'Corbel', 'Courier New', 'Georgia', 'Impact', 'Lucida Console', 'Palatino Linotype', 'Segoe Print', 'Segoe Script', 'Tahoma', 'Times New Roman', 'Trebuchet MS', 'Verdana'];
@@ -16,6 +17,8 @@ export class Inspector {
     store.on('load', () => this.build());
     store.on('change', (d) => { if (d?.live || this._self) return; this.refresh(); });
     store.on('focus-inspector', () => this.root.querySelector('input,textarea,select')?.focus());
+    // anahtar kareli değerler oynatma kafasıyla değişir
+    store.on('playhead', () => { if (store.selectedClips().some(anyKf)) this.refreshers.forEach((f) => f()); });
     this.build();
   }
 
@@ -24,7 +27,7 @@ export class Inspector {
   // değişiklik yardımcıları
   live(fn) { this._self = true; fn(); store.emit('change', { live: true }); this._self = false; }
   start() { store.begin(); }
-  end(label) { this._self = true; store.commit(label); this._self = false; }
+  end(label) { this._self = true; store.commit(label); this._self = false; this.refreshers.forEach((f) => f()); }
   once(label, fn) { this._self = true; store.transact(label, fn); this._self = false; this.refresh(); }
 
   refresh() {
@@ -95,8 +98,24 @@ export class Inspector {
   }
 
   // sayısal satır: etiket + kaydırıcı + sürüklenebilir sayı
-  numRow(parent, label, { get, set, min, max, step = 1, decimals = 0, suffix = '', def, slider = true, label2, display = (v) => v, parse = (v) => v, history }) {
+  numRow(parent, label, { get, set, min, max, step = 1, decimals = 0, suffix = '', def, slider = true, label2, display = (v) => v, parse = (v) => v, history, kf }) {
     const row = h('div', { class: 'prow' });
+    let kfCtl = null;
+    if (kf) {
+      // anahtar kareli özellik: değer oynatma kafasındaki değerdir; animasyonluysa yazmak anahtar kare ekler
+      const { clip, path } = kf;
+      const rawSet = set;
+      get = () => valueAt(clip, path, store.playhead);
+      set = (v) => {
+        if (!hasKf(clip, path)) return rawSet(v);
+        const prev = getPath(clip, path);
+        rawSet(v);
+        const nv = getPath(clip, path);
+        setPath(clip, path, prev);
+        upsertKf(clip, path, store.playhead, nv);
+      };
+      kfCtl = this.kfControls(clip, path, label);
+    }
     const lab = h('label', { class: 'plabel', title: def != null ? 'Sıfırlamak için çift tıklayın' : '' }, label);
     const dmin = display(min), dmax = display(max);
     const num = scrubNumber({
@@ -116,9 +135,45 @@ export class Inspector {
     if (def != null) lab.ondblclick = () => this.once(label + ' sıfırla', () => set(def));
     row.append(lab, range || h('span'), num);
     if (label2) row.append(h('span', { class: 'punit' }, label2));
+    if (kfCtl) { row.classList.add('has-kf'); row.append(kfCtl); }
     parent.append(row);
     this.refreshers.push(() => { const v = display(get()); num.set(v); if (range && document.activeElement !== range) range.value = v; });
     return row;
+  }
+
+  // < o > : önceki / anahtar kare ekle-kaldır / sonraki
+  kfControls(clip, path, label) {
+    const inRange = () => store.playhead >= clip.start - 1e-6 && store.playhead <= clip.start + clip.duration + 1e-6;
+    const prev = h('button', { class: 'kf-nav', title: 'Önceki anahtar kare', 'aria-label': `${label}: önceki anahtar kare`, html: icon('chevron', 12) });
+    const dia = h('button', { class: 'kf-dia', 'aria-label': `${label}: anahtar kare` });
+    const next = h('button', { class: 'kf-nav next', title: 'Sonraki anahtar kare', 'aria-label': `${label}: sonraki anahtar kare`, html: icon('chevron', 12) });
+    const upd = () => {
+      const anim = hasKf(clip, path), here = !!kfAt(clip, path, store.playhead);
+      dia.className = 'kf-dia' + (anim ? ' anim' : '') + (here ? ' on' : '');
+      dia.title = !anim ? 'Animasyonu başlat (oynatma kafasına anahtar kare ekler)' : here ? 'Bu anahtar kareyi kaldır · Sağ tık: seçenekler' : 'Anahtar kare ekle · Sağ tık: seçenekler';
+      prev.disabled = !anim || neighborKf(clip, path, store.playhead, -1) == null;
+      next.disabled = !anim || neighborKf(clip, path, store.playhead, 1) == null;
+    };
+    dia.onclick = () => {
+      if (!inRange()) return toast('Oynatma kafası klibin üzerinde olmalı', 'warn');
+      if (kfAt(clip, path, store.playhead)) this.once('Anahtar kare kaldır', () => removeKf(clip, path, store.playhead));
+      else this.once('Anahtar kare ekle', () => upsertKf(clip, path, store.playhead, valueAt(clip, path, store.playhead)));
+      upd();
+    };
+    dia.oncontextmenu = (e) => {
+      e.preventDefault();
+      const k = kfAt(clip, path, store.playhead);
+      contextMenu(e.clientX, e.clientY, [
+        ...Object.entries(EASINGS).map(([ek, el]) => ({ label: (k?.e === ek ? '✓ ' : '') + 'Geçiş: ' + el, disabled: !k, action: () => this.once('Anahtar kare yumuşatma', () => { kfAt(clip, path, store.playhead).e = ek; }) })),
+        '-',
+        { label: 'Animasyonu kaldır', disabled: !hasKf(clip, path), action: () => { this.once('Animasyonu kaldır', () => clearKf(clip, path, store.playhead)); upd(); } },
+      ]);
+    };
+    prev.onclick = () => { const t = neighborKf(clip, path, store.playhead, -1); if (t != null) store.setPlayhead(t); };
+    next.onclick = () => { const t = neighborKf(clip, path, store.playhead, 1); if (t != null) store.setPlayhead(t); };
+    upd();
+    this.refreshers.push(upd);
+    return h('span', { class: 'kf-ctl' }, prev, dia, next);
   }
 
   selectRow(parent, label, options, get, set, history) {
@@ -188,10 +243,10 @@ export class Inspector {
     const T = c.transform;
     const P = store.project;
     this.section('motion', 'Hareket', (b) => {
-      this.numRow(b, 'Konum X', { get: () => T.x, set: (v) => (T.x = v), min: -P.settings.width, max: P.settings.width, step: 1, def: 0 });
-      this.numRow(b, 'Konum Y', { get: () => T.y, set: (v) => (T.y = v), min: -P.settings.height, max: P.settings.height, step: 1, def: 0 });
-      this.numRow(b, 'Ölçek', { get: () => T.scale, set: (v) => (T.scale = v), min: 0.05, max: 5, step: 0.5, decimals: 0, suffix: '%', def: 1, display: (v) => v * 100, parse: (v) => v / 100 });
-      this.numRow(b, 'Döndürme', { get: () => T.rotation, set: (v) => (T.rotation = v), min: -360, max: 360, step: 0.5, decimals: 1, suffix: '°', def: 0 });
+      this.numRow(b, 'Konum X', { kf: { clip: c, path: 'transform.x' }, get: () => T.x, set: (v) => (T.x = v), min: -P.settings.width, max: P.settings.width, step: 1, def: 0 });
+      this.numRow(b, 'Konum Y', { kf: { clip: c, path: 'transform.y' }, get: () => T.y, set: (v) => (T.y = v), min: -P.settings.height, max: P.settings.height, step: 1, def: 0 });
+      this.numRow(b, 'Ölçek', { kf: { clip: c, path: 'transform.scale' }, get: () => T.scale, set: (v) => (T.scale = v), min: 0.05, max: 5, step: 0.5, decimals: 0, suffix: '%', def: 1, display: (v) => v * 100, parse: (v) => v / 100 });
+      this.numRow(b, 'Döndürme', { kf: { clip: c, path: 'transform.rotation' }, get: () => T.rotation, set: (v) => (T.rotation = v), min: -360, max: 360, step: 0.5, decimals: 1, suffix: '°', def: 0 });
       if (c.type === 'media') {
         this.selectRow(b, 'Sığdırma', { contain: 'Sığdır (kenar boşluklu)', cover: 'Doldur (kırparak)', fill: 'Esnet' }, () => T.fit, (v) => (T.fit = v), 'Sığdırma');
         const flips = h('div', { class: 'prow two' }, h('span', { class: 'plabel' }, 'Çevir'),
@@ -217,7 +272,7 @@ export class Inspector {
   opacitySection(c) {
     const T = c.transform;
     this.section('opacity', 'Opaklık ve Karışım', (b) => {
-      this.numRow(b, 'Opaklık', { get: () => T.opacity, set: (v) => (T.opacity = v), min: 0, max: 1, step: 0.5, suffix: '%', def: 1, display: (v) => v * 100, parse: (v) => clamp(v / 100, 0, 1) });
+      this.numRow(b, 'Opaklık', { kf: { clip: c, path: 'transform.opacity' }, get: () => T.opacity, set: (v) => (T.opacity = v), min: 0, max: 1, step: 0.5, suffix: '%', def: 1, display: (v) => v * 100, parse: (v) => clamp(v / 100, 0, 1) });
       this.selectRow(b, 'Karışım', BLENDS, () => T.blend, (v) => (T.blend = v), 'Karışım modu');
       this.numRow(b, 'Giriş (fade)', { get: () => c.fadeIn, set: (v) => (c.fadeIn = clamp(v, 0, c.duration)), min: 0, max: Math.min(10, c.duration), step: 0.01, decimals: 2, suffix: ' sn', def: 0 });
       this.numRow(b, 'Çıkış (fade)', { get: () => c.fadeOut, set: (v) => (c.fadeOut = clamp(v, 0, c.duration)), min: 0, max: Math.min(10, c.duration), step: 0.01, decimals: 2, suffix: ' sn', def: 0 });
@@ -236,14 +291,14 @@ export class Inspector {
       }
       b.append(grid);
       const pct = { min: -1, max: 1, step: 0.5, suffix: '', def: 0, display: (v) => v * 100, parse: (v) => v / 100 };
-      this.numRow(b, 'Parlaklık', { ...pct, get: () => C.brightness, set: (v) => (C.brightness = v) });
-      this.numRow(b, 'Kontrast', { ...pct, get: () => C.contrast, set: (v) => (C.contrast = v) });
-      this.numRow(b, 'Doygunluk', { ...pct, get: () => C.saturation, set: (v) => (C.saturation = v) });
-      this.numRow(b, 'Sıcaklık', { ...pct, get: () => C.temperature, set: (v) => (C.temperature = v) });
-      this.numRow(b, 'Ton (Tint)', { ...pct, get: () => C.tint, set: (v) => (C.tint = v) });
-      this.numRow(b, 'Renk tonu', { get: () => C.hue, set: (v) => (C.hue = v), min: -180, max: 180, step: 1, suffix: '°', def: 0 });
-      this.numRow(b, 'Vinyet', { get: () => C.vignette, set: (v) => (C.vignette = v), min: 0, max: 1, step: 0.5, def: 0, display: (v) => v * 100, parse: (v) => v / 100 });
-      this.numRow(b, 'Bulanıklık', { get: () => C.blur, set: (v) => (C.blur = v), min: 0, max: 30, step: 0.1, decimals: 1, suffix: ' px', def: 0 });
+      this.numRow(b, 'Parlaklık', { ...pct, kf: { clip: c, path: 'color.brightness' }, get: () => C.brightness, set: (v) => (C.brightness = v) });
+      this.numRow(b, 'Kontrast', { ...pct, kf: { clip: c, path: 'color.contrast' }, get: () => C.contrast, set: (v) => (C.contrast = v) });
+      this.numRow(b, 'Doygunluk', { ...pct, kf: { clip: c, path: 'color.saturation' }, get: () => C.saturation, set: (v) => (C.saturation = v) });
+      this.numRow(b, 'Sıcaklık', { ...pct, kf: { clip: c, path: 'color.temperature' }, get: () => C.temperature, set: (v) => (C.temperature = v) });
+      this.numRow(b, 'Ton (Tint)', { ...pct, kf: { clip: c, path: 'color.tint' }, get: () => C.tint, set: (v) => (C.tint = v) });
+      this.numRow(b, 'Renk tonu', { kf: { clip: c, path: 'color.hue' }, get: () => C.hue, set: (v) => (C.hue = v), min: -180, max: 180, step: 1, suffix: '°', def: 0 });
+      this.numRow(b, 'Vinyet', { kf: { clip: c, path: 'color.vignette' }, get: () => C.vignette, set: (v) => (C.vignette = v), min: 0, max: 1, step: 0.5, def: 0, display: (v) => v * 100, parse: (v) => v / 100 });
+      this.numRow(b, 'Bulanıklık', { kf: { clip: c, path: 'color.blur' }, get: () => C.blur, set: (v) => (C.blur = v), min: 0, max: 30, step: 0.1, decimals: 1, suffix: ' px', def: 0 });
     }, { onReset: () => { this.once('Rengi sıfırla', () => Object.assign(C, DEFAULT_COLOR())); this.build(); } });
   }
 
@@ -313,9 +368,9 @@ export class Inspector {
   audioSection(c) {
     const dB = (v) => (v <= 0.0001 ? '-∞' : (20 * Math.log10(v)).toFixed(1));
     this.section('audio', 'Ses', (b) => {
-      const row = this.numRow(b, 'Seviye', { get: () => c.volume, set: (v) => (c.volume = v), min: 0, max: 2, step: 0.5, suffix: '%', def: 1, display: (v) => v * 100, parse: (v) => clamp(v / 100, 0, 2), label2: dB(c.volume) + ' dB', history: 'Ses seviyesi' });
+      const row = this.numRow(b, 'Seviye', { kf: { clip: c, path: 'volume' }, get: () => c.volume, set: (v) => (c.volume = v), min: 0, max: 2, step: 0.5, suffix: '%', def: 1, display: (v) => v * 100, parse: (v) => clamp(v / 100, 0, 2), label2: dB(c.volume) + ' dB', history: 'Ses seviyesi' });
       const unit = row.querySelector('.punit');
-      this.refreshers.push(() => { unit.textContent = dB(c.volume) + ' dB'; });
+      this.refreshers.push(() => { unit.textContent = dB(valueAt(c, 'volume', store.playhead)) + ' dB'; });
       this.numRow(b, 'Giriş (fade)', { get: () => c.audioFadeIn, set: (v) => (c.audioFadeIn = clamp(v, 0, c.duration)), min: 0, max: Math.min(10, c.duration), step: 0.01, decimals: 2, suffix: ' sn', def: 0 });
       this.numRow(b, 'Çıkış (fade)', { get: () => c.audioFadeOut, set: (v) => (c.audioFadeOut = clamp(v, 0, c.duration)), min: 0, max: Math.min(10, c.duration), step: 0.01, decimals: 2, suffix: ' sn', def: 0 });
       this.toggleRow(b, 'Sessiz', () => c.muted, (v) => (c.muted = v));

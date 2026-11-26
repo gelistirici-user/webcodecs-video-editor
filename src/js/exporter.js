@@ -8,6 +8,7 @@ import { layersAt, drawFrame } from './compositor.js';
 import { decodeAudio } from './media.js';
 import { native, isElectron } from './platform.js';
 import { clamp, EPS } from './utils.js';
+import { hasKf, sampleVolume } from './keyframes.js';
 
 export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
   const len = Math.max(1, Math.ceil((t1 - t0) * sampleRate));
@@ -35,13 +36,21 @@ export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
     src.buffer = buf;
     src.playbackRate.value = c.speed;
     const g = ctx.createGain();
-    const vol = c.volume * (tr.volume ?? 1);
+    const animVol = hasKf(c, 'volume');
+    const vol = (animVol ? 1 : c.volume) * (tr.volume ?? 1);
     // fade otomasyonu (bağlam zamanında)
     const at = (t) => Math.max(0, t - t0);
     g.gain.setValueAtTime(c.audioFadeIn > 0 ? 0 : vol, at(cs));
     if (c.audioFadeIn > 0) g.gain.linearRampToValueAtTime(vol, at(cs + c.audioFadeIn));
     if (c.audioFadeOut > 0) { g.gain.setValueAtTime(vol, at(ce - c.audioFadeOut)); g.gain.linearRampToValueAtTime(0, at(ce)); }
-    src.connect(g).connect(master);
+    if (animVol) {
+      // anahtar kareli ses seviyesi: ikinci kazanç düğümünde otomasyon
+      const kg = ctx.createGain();
+      const pts = sampleVolume(c, Math.max(cs, t0), Math.min(ce, t1));
+      kg.gain.setValueAtTime(pts[0][1], at(pts[0][0]));
+      for (const [tt, v] of pts.slice(1)) kg.gain.linearRampToValueAtTime(v, at(tt));
+      src.connect(g).connect(kg).connect(master);
+    } else src.connect(g).connect(master);
     const skip = Math.max(0, t0 - cs);
     const when = Math.max(0, cs - t0);
     const offset = c.in + skip * c.speed;

@@ -8,6 +8,7 @@ import { importItems, buildCache } from './media.js';
 import { exportVideo, codecSupport, estimateSize } from './exporter.js';
 import { pickMedia, pickSingleMedia, filesFromDrop, saveProject, openProjectFile, projectNameFromPath, isElectron, native } from './platform.js';
 import { TRANSITIONS, COLOR_PRESETS, ANIMATIONS, measureTextBox } from './compositor.js';
+import { animated, writeValue } from './keyframes.js';
 import { h, clamp, formatTC, formatDur, parseTC, debounce, uid, EPS } from './utils.js';
 import { icon, contextMenu, toast, modal, confirmDialog, promptDialog } from './ui.js';
 
@@ -93,7 +94,7 @@ function selectedVisualClip() {
 }
 function clipBox(c) {
   const S = store.project.settings;
-  const T = c.transform;
+  const T = animated(c, store.playhead).transform;
   let w = S.width, hh = S.height;
   if (c.type === 'text') { const b = measureTextBox(c, store.project); w = b.w + 20; hh = b.h + 10; }
   else if (c.type === 'media') {
@@ -122,8 +123,10 @@ function drawOverlay() {
     e.preventDefault(); e.stopPropagation();
     box.setPointerCapture(e.pointerId);
     const handle = e.target.dataset.h;
-    const T = c.transform;
+    const T = animated(c, store.playhead).transform;
     const o = { x: e.clientX, y: e.clientY, tx: T.x, ty: T.y, sc: T.scale, rot: T.rotation };
+    // animasyonlu özelliklerde oynatma kafasına anahtar kare yazar
+    const put = (k, v) => writeValue(c, 'transform.' + k, store.playhead, v);
     const fr = frame.getBoundingClientRect();
     const center = { x: fr.left + b.cx * k, y: fr.top + b.cy * k };
     const d0 = Math.hypot(e.clientX - center.x, e.clientY - center.y);
@@ -132,17 +135,17 @@ function drawOverlay() {
     const mv = (ev) => {
       if (handle) {
         const d = Math.hypot(ev.clientX - center.x, ev.clientY - center.y);
-        T.scale = clamp(o.sc * (d / Math.max(1, d0)), 0.02, 10);
+        put('scale', clamp(o.sc * (d / Math.max(1, d0)), 0.02, 10));
       } else if (ev.altKey) {
         const a = Math.atan2(ev.clientY - center.y, ev.clientX - center.x);
         let r = o.rot + ((a - a0) * 180) / Math.PI;
         if (ev.shiftKey) r = Math.round(r / 15) * 15;
-        T.rotation = Math.round(r * 10) / 10;
+        put('rotation', Math.round(r * 10) / 10);
       } else {
         let nx = o.tx + (ev.clientX - o.x) / k, ny = o.ty + (ev.clientY - o.y) / k;
         // merkeze yakalama
         if (!ev.shiftKey) { if (Math.abs(nx) < 12) nx = 0; if (Math.abs(ny) < 12) ny = 0; }
-        T.x = Math.round(nx); T.y = Math.round(ny);
+        put('x', Math.round(nx)); put('y', Math.round(ny));
       }
       store.emit('change', { live: true });
       drawOverlay();
