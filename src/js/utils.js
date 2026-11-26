@@ -9,6 +9,7 @@ export const uid = (p = 'id') => `${p}_${Date.now().toString(36)}${(++_uid).toSt
 
 export function formatTC(t, fps = 30) {
   if (!isFinite(t) || t < 0) t = 0;
+  fps = Math.max(1, Math.round(fps || 30));
   const totalFrames = Math.round(t * fps);
   const f = totalFrames % fps;
   const s = Math.floor(totalFrames / fps);

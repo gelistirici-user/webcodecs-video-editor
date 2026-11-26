@@ -70,6 +70,21 @@ function createWindow() {
   Menu.setApplicationMenu(null);
   win.loadURL('app://kurgu/index.html');
   win.once('ready-to-show', () => { win.maximize(); win.show(); });
+  // Geliştirici öz testi: KURGU_SELFTEST=<betik yolu> ile çalıştırılır
+  if (process.env.KURGU_SELFTEST) {
+    win.webContents.on('console-message', (e) => console.log('[renderer]', e.message));
+    win.webContents.once('did-finish-load', async () => {
+      try {
+        const code = fs.readFileSync(process.env.KURGU_SELFTEST, 'utf8');
+        const out = await win.webContents.executeJavaScript(code, true);
+        console.log('SELFTEST RESULT', JSON.stringify(out));
+        const img = await win.webContents.capturePage();
+        fs.writeFileSync(process.env.KURGU_SELFTEST + '.png', img.toPNG());
+      } catch (e) { console.log('SELFTEST ERROR', e && e.message); }
+      allowClose = true;
+      app.quit();
+    });
+  }
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'F12') { win.webContents.toggleDevTools(); e.preventDefault(); }
   });

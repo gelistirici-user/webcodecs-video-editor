@@ -166,14 +166,16 @@ frame.addEventListener('pointerdown', (e) => {
 });
 
 // ---------- güncellemeler ----------
-let durLast = -1;
 function updateTimecodes() {
   const fps = store.fps;
   const tc = formatTC(store.playhead, fps);
   if (document.activeElement !== $('#tcCurrent') && monMode === 'program') $('#tcCurrent').value = tc;
   $('#tlTc').textContent = tc;
-  const d = store.duration();
-  if (d !== durLast || monMode === 'source') { durLast = d; if (monMode === 'program') $('#tcDuration').textContent = formatTC(d, fps); }
+  if (monMode === 'program') {
+    const d = store.duration();
+    $('#tcDuration').textContent = formatTC(d, fps);
+    $('#tcDuration').title = 'Sekans süresi';
+  }
 }
 store.on('playhead', updateTimecodes);
 store.on('change', () => { updateTimecodes(); updateTitle(); scheduleAutosave(); updateUndoButtons(); });
@@ -882,6 +884,8 @@ function exportDialog() {
   const S = P.settings;
   const dur = store.duration();
   if (dur <= 0) return toast('Dışa aktarılacak bir şey yok — önce zaman çizelgesine klip ekleyin', 'warn', 3500);
+  const offline = P.clips.filter((c) => c.type === 'media' && store.media(c.mediaId)?.offline).length;
+  if (offline) toast(`${offline} klibin medyası çevrimdışı; bu klipler çıktıda boş görünecek. Medya panelinden yeniden bağlayabilirsiniz.`, 'warn', 6000);
   const hasRange = P.inPoint != null || P.outPoint != null;
   const nameInp = h('input', { class: 'inp', value: P.name, 'aria-label': 'Dosya adı' });
   const fmt = h('select', { class: 'inp' }, h('option', { value: 'mp4' }, 'MP4 (H.264 + AAC) — önerilen'), h('option', { value: 'webm' }, 'WebM (VP9 + Opus)'));
