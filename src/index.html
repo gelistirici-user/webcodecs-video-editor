@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' media: blob: data:; img-src 'self' media: blob: data:; media-src 'self' media: blob: data:; connect-src 'self' media: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:">
+  <title>Kurgu Studio</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="page-edit">
+  <header class="topbar">
+    <div class="brand" aria-label="Kurgu Studio">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="4" fill="#4c8dff"/><path d="M10 8.5v7l6-3.5z" fill="#fff"/></svg>
+      <span>Kurgu <b>Studio</b></span>
+    </div>
+    <nav class="menus" aria-label="Ana menü">
+      <button class="menu-btn" data-menu="file">Dosya</button>
+      <button class="menu-btn" data-menu="edit">Düzen</button>
+      <button class="menu-btn" data-menu="clip">Klip</button>
+      <button class="menu-btn" data-menu="view">Görünüm</button>
+      <button class="menu-btn" data-menu="help">Yardım</button>
+    </nav>
+    <div class="pages" role="tablist" aria-label="Çalışma alanı">
+      <button role="tab" class="page-tab on" data-page="edit" aria-selected="true" title="Kurgu (Alt+1)">Kurgu</button>
+      <button role="tab" class="page-tab" data-page="color" aria-selected="false" title="Renk (Alt+2)">Renk</button>
+      <button role="tab" class="page-tab" data-page="deliver" aria-selected="false" title="Teslim / Dışa aktar (Alt+3)">Teslim</button>
+    </div>
+    <div class="top-right">
+      <div class="proj-info"><span class="proj-name" id="projName">Adsız Proje</span><span class="save-state" id="saveState"></span></div>
+      <button class="icon-btn" id="btnUndo" title="Geri al (Ctrl+Z)" aria-label="Geri al"></button>
+      <button class="icon-btn" id="btnRedo" title="Yinele (Ctrl+Shift+Z)" aria-label="Yinele"></button>
+      <button class="btn primary" id="btnExport" title="Dışa aktar (Ctrl+M)"></button>
+    </div>
+  </header>
+
+  <main class="workspace" id="workspace">
+    <aside class="panel left" id="leftPanel">
+      <div class="tabs" role="tablist">
+        <button role="tab" class="tab on" data-tab="media" aria-selected="true">Medya</button>
+        <button role="tab" class="tab" data-tab="effects" aria-selected="false">Efektler</button>
+      </div>
+      <div class="tab-body" data-body="media" id="mediaPanel"></div>
+      <div class="tab-body hidden" data-body="effects" id="effectsPanel"></div>
+    </aside>
+    <div class="resizer v" data-resize="left" role="separator" aria-orientation="vertical" title="Sürükleyerek boyutlandırın"></div>
+
+    <section class="monitor" id="monitor">
+      <div class="mon-head">
+        <div class="tabs small" role="tablist">
+          <button role="tab" class="tab on" data-mon="program" aria-selected="true">Program</button>
+          <button role="tab" class="tab" data-mon="source" aria-selected="false">Kaynak</button>
+        </div>
+        <span class="mon-title" id="monTitle"></span>
+        <div class="mon-opts">
+          <select class="inp sm" id="monQuality" title="Önizleme kalitesi (performans)" aria-label="Önizleme kalitesi">
+            <option value="1">Tam kalite</option>
+            <option value="0.5">1/2 kalite</option>
+            <option value="0.25">1/4 kalite</option>
+          </select>
+          <button class="icon-btn sm" id="btnSafe" title="Güvenli alan kılavuzları" aria-label="Güvenli alan kılavuzları" aria-pressed="false"></button>
+          <button class="icon-btn sm" id="btnSnap" title="Kareyi PNG olarak kaydet" aria-label="Anlık görüntü"></button>
+          <button class="icon-btn sm" id="btnFull" title="Tam ekran (`)" aria-label="Tam ekran"></button>
+        </div>
+      </div>
+      <div class="stage" id="stage">
+        <div class="frame" id="frame">
+          <canvas id="programCanvas"></canvas>
+          <div class="overlay" id="overlay"></div>
+          <div class="safe hidden" id="safe"><div class="safe-a"></div><div class="safe-t"></div></div>
+        </div>
+        <div class="source-view hidden" id="sourceView">
+          <video id="sourceVideo" crossorigin="anonymous" playsinline></video>
+          <div class="source-empty" id="sourceEmpty">Kaynak monitörde açmak için Medya panelinde bir dosyaya çift tıklayın</div>
+        </div>
+        <div class="scopes" id="scopesBox">
+          <div class="scopes-head">
+            <div class="seg" role="tablist" aria-label="Ölçüm türü">
+              <button class="seg-btn on" data-scope="waveform">Dalga formu</button>
+              <button class="seg-btn" data-scope="histogram">Histogram</button>
+              <button class="seg-btn" data-scope="vectorscope">Vektörskop</button>
+            </div>
+          </div>
+          <canvas id="scopeCanvas"></canvas>
+        </div>
+      </div>
+      <div class="scrub" id="sourceScrub" hidden><div class="scrub-range" id="srcRange"></div><div class="scrub-head" id="srcHead"></div></div>
+      <div class="transport">
+        <input class="tc-input" id="tcCurrent" aria-label="Geçerli zaman kodu" title="Zaman koduna gitmek için yazın ve Enter'a basın" spellcheck="false">
+        <div class="t-btns">
+          <button class="icon-btn" id="tIn" title="Giriş noktası (I)" aria-label="Giriş noktası"><b class="io">{</b></button>
+          <button class="icon-btn" id="tStart" title="Başa git (Home)" aria-label="Başa git"></button>
+          <button class="icon-btn" id="tPrev" title="Önceki kare (←)" aria-label="Önceki kare"></button>
+          <button class="icon-btn play" id="tPlay" title="Oynat / Duraklat (Boşluk)" aria-label="Oynat"></button>
+          <button class="icon-btn" id="tNext" title="Sonraki kare (→)" aria-label="Sonraki kare"></button>
+          <button class="icon-btn" id="tEnd" title="Sona git (End)" aria-label="Sona git"></button>
+          <button class="icon-btn" id="tOut" title="Çıkış noktası (O)" aria-label="Çıkış noktası"><b class="io">}</b></button>
+          <button class="icon-btn" id="tLoop" title="Döngü (Ctrl+L)" aria-label="Döngü" aria-pressed="false"></button>
+          <span class="src-actions" id="srcActions" hidden>
+            <button class="btn sm" id="srcInsert" title="Oynatma kafasına ekle, sonrasını kaydır (,)">Ekle</button>
+            <button class="btn sm" id="srcOverwrite" title="Oynatma kafasına üzerine yaz (.)">Üzerine yaz</button>
+          </span>
+        </div>
+        <span class="tc-dur" id="tcDuration" title="Toplam süre"></span>
+      </div>
+    </section>
+    <div class="resizer v" data-resize="right" role="separator" aria-orientation="vertical" title="Sürükleyerek boyutlandırın"></div>
+
+    <aside class="panel right" id="rightPanel">
+      <div class="panel-head">Denetçi</div>
+      <div class="inspector" id="inspector"></div>
+    </aside>
+  </main>
+
+  <div class="resizer h" data-resize="timeline" role="separator" aria-orientation="horizontal" title="Sürükleyerek boyutlandırın"></div>
+
+  <section class="timeline" id="timeline">
+    <div class="tl-toolbar">
+      <div class="seg tools" role="toolbar" aria-label="Araçlar">
+        <button class="seg-btn on" data-tool="select" title="Seçim aracı (V)" aria-label="Seçim aracı"></button>
+        <button class="seg-btn" data-tool="razor" title="Jilet aracı (C)" aria-label="Jilet aracı"></button>
+      </div>
+      <button class="icon-btn tog on" id="btnSnapping" title="Yakalama (S)" aria-label="Yakalama" aria-pressed="true"></button>
+      <button class="icon-btn tog on" id="btnLinked" title="Bağlantılı seçim (Ctrl+Shift+L)" aria-label="Bağlantılı seçim" aria-pressed="true"></button>
+      <span class="tb-sep"></span>
+      <button class="icon-btn" id="btnSplit" title="Oynatma kafasında böl (Ctrl+K)" aria-label="Oynatma kafasında böl"></button>
+      <button class="icon-btn" id="btnMarker" title="İşaretçi ekle (M)" aria-label="İşaretçi ekle"></button>
+      <button class="icon-btn" id="btnDelete" title="Seçimi sil (Delete)" aria-label="Seçimi sil"></button>
+      <span class="tb-sep"></span>
+      <span class="tl-hint" id="tlHint"></span>
+      <div class="zoom">
+        <button class="icon-btn sm" id="zoomOut" title="Uzaklaştır (-)" aria-label="Uzaklaştır"></button>
+        <input type="range" class="slider" id="zoomSlider" min="0" max="100" value="40" aria-label="Zaman çizelgesi yakınlaştırma">
+        <button class="icon-btn sm" id="zoomIn" title="Yakınlaştır (+)" aria-label="Yakınlaştır"></button>
+        <button class="btn sm ghost" id="zoomFit" title="Tümünü sığdır (\)">Sığdır</button>
+      </div>
+    </div>
+    <div class="tl-body">
+      <div class="tl-corner"><span id="tlTc">00:00:00:00</span></div>
+      <div class="tl-ruler-wrap"><canvas class="tl-ruler"></canvas></div>
+      <div class="tl-headers"><div class="tl-headers-inner"></div></div>
+      <div class="tl-scroll" tabindex="-1">
+        <canvas class="tl-canvas"></canvas>
+        <div class="tl-spacer"></div>
+      </div>
+      <div class="meters" id="meters" title="Ses ölçerleri (dBFS)">
+        <canvas id="meterCanvas"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <footer class="statusbar">
+    <span id="statusMsg">Hazır</span>
+    <span class="status-right"><span id="statusSeq"></span><span id="statusAuto"></span></span>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

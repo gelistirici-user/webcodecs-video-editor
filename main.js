@@ -15,7 +15,22 @@ const MIME = {
 // media://file/<encodeURIComponent(mutlak yol)> — Range destekli, CORS açık yerel dosya sunumu.
 protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true, bypassCSP: true } },
+  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
+
+const APP_ROOT = path.join(__dirname, 'src');
+const APP_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2' };
+async function serveApp(request) {
+  const url = new URL(request.url);
+  let rel = decodeURIComponent(url.pathname);
+  if (rel === '/' || !rel) rel = '/index.html';
+  const file = path.normalize(path.join(APP_ROOT, rel));
+  if (!file.startsWith(APP_ROOT)) return new Response('Yasak', { status: 403 });
+  try {
+    const data = await fsp.readFile(file);
+    return new Response(data, { headers: { 'Content-Type': APP_TYPES[path.extname(file)] || 'application/octet-stream' } });
+  } catch { return new Response('Bulunamadı', { status: 404 }); }
+}
 
 function serveMedia(request) {
   const url = new URL(request.url);
@@ -53,7 +68,7 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   Menu.setApplicationMenu(null);
-  win.loadFile(path.join(__dirname, 'src', 'index.html'));
+  win.loadURL('app://kurgu/index.html');
   win.once('ready-to-show', () => { win.maximize(); win.show(); });
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'F12') { win.webContents.toggleDevTools(); e.preventDefault(); }
@@ -68,6 +83,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   protocol.handle('media', serveMedia);
+  protocol.handle('app', serveApp);
   createWindow();
 });
 app.on('window-all-closed', () => app.quit());
