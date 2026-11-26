@@ -1,6 +1,8 @@
 // Araçlar menüsü: ses normalleştirme, otomatik ducking (ve diğer otomatik kurgu araçları)
 import { store } from './store.js';
-import { h } from './utils.js';
+import { h, EPS, formatDur } from './utils.js';
+import { srcTimeAt } from './timemap.js';
+import { valueAt } from './keyframes.js';
 import { modal, toast } from './ui.js';
 import { normalizeClips, autoDuck } from './audiofx.js';
 
@@ -56,6 +58,115 @@ export function duckDialog() {
       let r;
       store.transact('Otomatik ducking', () => { r = autoDuck({ musicTrackIds: m, voiceTrackIds: v, duckDb: parseFloat(db.value) || -14, threshold: parseFloat(thr.value) / 100 }); });
       toast(r.clips ? `${r.regions} konuşma bölgesi bulundu, ${r.clips} müzik klibi ayarlandı` : 'Müzik izlerinde konuşmayla çakışan klip yok', r.clips ? 'ok' : 'warn', 3500);
+    } }],
+  });
+}
+
+// ---------- sessizlikleri kes ----------
+// Klibin sesinde eşik altında kalan, en az minDur süren aralıklar (zaman çizelgesi zamanı)
+export function findSilences(c, { thresholdDb = -38, minDur = 0.6, pad = 0.15 } = {}) {
+  const m = store.media(c.mediaId);
+  const cache = store.mediaCache.get(c.mediaId);
+  if (!m || !cache?.peaks) return null;
+  const { peaks, peaksRate } = cache;
+  const thr = Math.pow(10, thresholdDb / 20);
+  const step = 1 / 50;
+  const out = [];
+  let runStart = null;
+  const end = c.start + c.duration;
+  for (let t = c.start; t < end + step / 2; t += step) {
+    let quiet = t < end;
+    if (quiet) {
+      let a = srcTimeAt(c, t, m), b = srcTimeAt(c, Math.min(end, t + step), m);
+      if (b < a) [a, b] = [b, a];
+      let mx = 0;
+      for (let k = Math.floor(a * peaksRate); k <= Math.floor(b * peaksRate); k++) mx = Math.max(mx, peaks[k] || 0);
+      quiet = mx * valueAt(c, 'volume', t) < thr;
+    }
+    if (quiet && runStart == null) runStart = t;
+    if (!quiet && runStart != null) {
+      const a = runStart + (runStart > c.start + EPS ? pad : 0), b = Math.min(end, t) - (t < end - EPS ? pad : 0);
+      if (b - a >= Math.max(minDur - 2 * pad, 0.05)) out.push([a, b]);
+      runStart = null;
+    }
+  }
+  return out;
+}
+
+function silenceTargets() {
+  const sel = store.selectedClips();
+  const audio = new Map();
+  for (const c of sel) for (const k of store.linked(c)) if (store.track(k.trackId)?.kind === 'audio' && k.type === 'media') audio.set(k.id, k);
+  return [...audio.values()];
+}
+
+export function removeSilences(ranges, groupOf) {
+  // sondan başa: önceki aralıkların zamanları kaymaz
+  const fps = store.fps;
+  let removed = 0;
+  for (const { range: [a0, b0], audioId } of [...ranges].sort((x, y) => y.range[0] - x.range[0])) {
+    const a = Math.round(a0 * fps) / fps, b = Math.round(b0 * fps) / fps;
+    if (b - a < 1 / fps) continue;
+    const anchor = store.project.clips.find((k) => k.id === audioId) || null;
+    const group = groupOf(anchor, a, b);
+    if (!group.length) continue;
+    store.splitAt(group, a);
+    const g2 = groupOf(anchor, a, b, true);
+    store.splitAt(g2, b);
+    const tracks = new Set(group.map((k) => k.trackId));
+    const mid = store.project.clips.filter((k) => tracks.has(k.trackId) && Math.abs(k.start - a) < 1e-3 && Math.abs(k.start + k.duration - b) < 1e-3);
+    if (!mid.length) continue;
+    store.removeClips(new Set(mid.map((k) => k.id)), true);
+    removed += b - a;
+  }
+  return removed;
+}
+
+export function silenceDialog() {
+  const targets = silenceTargets();
+  if (!targets.length) return toast('Önce sesli bir klip seçin (video seçerseniz bağlı sesi kullanılır)', 'warn', 3500);
+  if (targets.some((c) => !store.mediaCache.get(c.mediaId)?.peaks)) return toast('Dalga formu henüz hazırlanıyor; birkaç saniye sonra tekrar deneyin', 'warn', 3500);
+  const thr = h('input', { type: 'range', class: 'slider', min: -60, max: -20, step: 1, value: -38 });
+  const thrL = h('span', { class: 'muted-p' });
+  const minD = h('input', { class: 'inp', type: 'number', min: 0.2, max: 5, step: 0.1, value: 0.6 });
+  const pad = h('input', { class: 'inp', type: 'number', min: 0, max: 1, step: 0.05, value: 0.15 });
+  const info = h('div', { class: 'export-sum' });
+  let found = [];
+  const calc = () => {
+    thrL.textContent = thr.value + ' dB';
+    const o = { thresholdDb: +thr.value, minDur: +minD.value || 0.6, pad: +pad.value || 0 };
+    found = targets.flatMap((c) => (findSilences(c, o) || []).map((range) => ({ range, audioId: c.id })));
+    // aynı bağlantılı gruptaki çakışan aralıkları tekilleştir
+    found.sort((x, y) => x.range[0] - y.range[0]);
+    const merged = [];
+    for (const f of found) { const l = merged[merged.length - 1]; if (l && f.range[0] <= l.range[1]) l.range[1] = Math.max(l.range[1], f.range[1]); else merged.push({ range: [...f.range], audioId: f.audioId }); }
+    found = merged;
+    const total = found.reduce((s, f) => s + f.range[1] - f.range[0], 0);
+    info.innerHTML = '';
+    info.append(h('div', {}, h('span', {}, 'Sessiz bölüm'), h('b', {}, String(found.length))), h('div', {}, h('span', {}, 'Kısalacak süre'), h('b', {}, formatDur(total) + ` (${total.toFixed(1)} sn)`)));
+  };
+  [thr, minD, pad].forEach((x) => x.addEventListener('input', calc));
+  [minD, pad].forEach((x) => x.addEventListener('keydown', (e) => e.stopPropagation()));
+  calc();
+  const body = h('div', { class: 'form' },
+    h('p', { class: 'muted-p' }, 'Seçili kliplerdeki sessiz yerler kesilir ve boşluklar kapatılır (bağlı video ile birlikte). Geri alınabilir.'),
+    h('label', { class: 'field' }, h('span', {}, 'Sessizlik eşiği'), h('div', { class: 'range-row' }, thr, thrL)),
+    h('div', { class: 'row2' }, h('label', { class: 'field' }, h('span', {}, 'En kısa sessizlik (sn)'), minD), h('label', { class: 'field' }, h('span', {}, 'Kenar payı (sn)'), pad)),
+    info);
+  modal({
+    title: 'Sessizlikleri Kes', body, width: 480,
+    buttons: [{ label: 'Vazgeç' }, { label: 'Kes', primary: true, action: () => {
+      if (!found.length) { toast('Kesilecek sessiz bölüm bulunamadı', 'warn'); return false; }
+      const groupOf = (anchor, a, b) => {
+        if (!anchor) return [];
+        const linked = store.linked(anchor);
+        // aralığı kapsayan aynı gruptaki parçalar
+        const tracks = new Set(linked.map((k) => k.trackId));
+        return store.project.clips.filter((k) => tracks.has(k.trackId) && k.start < b - 1e-3 && k.start + k.duration > a + 1e-3);
+      };
+      let total = 0;
+      store.transact('Sessizlikleri kes', () => { total = removeSilences(found, groupOf); });
+      toast(`${found.length} sessiz bölüm kesildi, ${total.toFixed(1)} sn kısaldı`, 'ok', 3500);
     } }],
   });
 }
