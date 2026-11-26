@@ -9,3 +9,10 @@ fs.copyFileSync(
   path.join(out, 'mediabunny.mjs')
 );
 console.log('vendor: mediabunny.mjs kopyalandı');
+
+// Whisper (otomatik altyazı): transformers.js + ONNX Runtime wasm
+const tdir = path.join(out, 'transformers');
+fs.mkdirSync(tdir, { recursive: true });
+const tsrc = path.join(root, 'node_modules', '@huggingface', 'transformers', 'dist');
+for (const f of ['transformers.min.js', 'ort-wasm-simd-threaded.jsep.mjs', 'ort-wasm-simd-threaded.jsep.wasm']) fs.copyFileSync(path.join(tsrc, f), path.join(tdir, f));
+console.log('vendor: transformers.js kopyalandı');

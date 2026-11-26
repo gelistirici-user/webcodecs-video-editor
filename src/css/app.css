@@ -396,3 +396,6 @@ kbd { font: 11px var(--mono); background: var(--bg0); border: 1px solid var(--li
 .chk-list { display: flex; flex-direction: column; gap: 2px; background: var(--bg0); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; max-height: 140px; overflow: auto; }
 .range-row { display: flex; align-items: center; gap: 8px; }
 .range-row .slider { flex: 1; }
+.asr-preview { max-height: 180px; overflow: auto; margin-top: 10px; font-size: 12px; line-height: 1.5; color: var(--tx1); background: var(--bg0); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.asr-preview:empty { display: none; }
+.asr-preview b { color: var(--acc2); font: 600 11px var(--mono); }

@@ -7,7 +7,9 @@
   "author": "gelistirici-user",
   "license": "MIT",
   "scripts": {
+    "prestart": "node scripts/vendor.js",
     "start": "electron .",
+    "preserve": "node scripts/vendor.js",
     "serve": "node scripts/serve.js",
     "vendor": "node scripts/vendor.js",
     "dist": "npm run vendor && electron-builder --win portable nsis"
@@ -44,6 +46,7 @@
     "asar": true
   },
   "devDependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "electron": "^45.5.0",
     "electron-builder": "^26.18.0",
     "mediabunny": "^1.66.4"

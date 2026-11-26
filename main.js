@@ -19,7 +19,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const APP_ROOT = path.join(__dirname, 'src');
-const APP_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2' };
+const APP_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2', '.wasm': 'application/wasm' };
 async function serveApp(request) {
   const url = new URL(request.url);
   let rel = decodeURIComponent(url.pathname);
