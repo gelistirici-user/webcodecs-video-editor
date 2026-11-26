@@ -270,7 +270,10 @@ class Store {
     const track = this.track(trackId);
     const srcIn = opts.in ?? media.srcIn ?? 0;
     const srcOut = opts.out ?? media.srcOut ?? (media.kind === 'image' ? null : media.duration);
-    const dur = media.kind === 'image' ? (opts.duration || 5) : Math.max(1 / this.fps, srcOut - srcIn);
+    const fps = this.fps;
+    // kare hizalı başlangıç ve süre (kaynağın sonunu aşmamak için aşağı yuvarla)
+    start = Math.round(start * fps) / fps;
+    const dur = media.kind === 'image' ? (opts.duration || 5) : Math.max(1 / fps, Math.floor((srcOut - srcIn) * fps + 1e-6) / fps);
     const placed = [];
     const linkId = media.kind === 'video' && media.hasAudio ? uid('l') : null;
     let vTrack = null, aTrack = null;

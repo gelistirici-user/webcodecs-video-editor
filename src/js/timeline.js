@@ -209,6 +209,14 @@ export class Timeline {
       this.drawClip(ctx, c, r, sy, mm, W);
     }
 
+    if (!P.clips.length && !this.ghost) {
+      ctx.fillStyle = '#4a505c';
+      ctx.font = '13px "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Medya panelinden klipleri buraya sürükleyin  ·  Dosyaları doğrudan da bırakabilirsiniz', W / 2, Math.min(H / 2, this._splitY - sy + 20));
+      ctx.textAlign = 'left';
+    }
+
     // sürükleme hayaleti
     if (this.ghost) {
       for (const g of this.ghost.items) {

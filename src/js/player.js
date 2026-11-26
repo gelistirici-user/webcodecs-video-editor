@@ -184,7 +184,7 @@ export class Player {
     const W = this.canvas.width, H = this.canvas.height;
     drawFrame(this.ctx, W, H, P, t, layers, (L) => {
       const m = mm.get(L.clip.mediaId);
-      if (!m) return null;
+      if (!m || m.offline) return { offline: true };
       if (m.kind === 'image') { const img = this.image(m); return img.complete && img.naturalWidth ? { el: img, w: img.naturalWidth, h: img.naturalHeight } : null; }
       const e = this.pool.get(L.clip.id);
       if (!e || e.el.readyState < 2) return null;

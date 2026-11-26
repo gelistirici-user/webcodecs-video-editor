@@ -358,7 +358,8 @@ kbd { font: 11px var(--mono); background: var(--bg0); border: 1px solid var(--li
 .about p { margin: 0 0 10px; line-height: 1.55; }
 
 /* ---------- renk sayfası ---------- */
-.page-color .workspace { grid-template-columns: var(--left-w) 5px minmax(320px, 1fr) 5px max(var(--right-w), 360px); }
+.page-color .workspace { grid-template-columns: 0 0 minmax(320px, 1fr) 5px max(var(--right-w), 380px); }
+.page-color #leftPanel, .page-color [data-resize="left"] { visibility: hidden; overflow: hidden; }
 
 /* kaydırma çubukları */
 ::-webkit-scrollbar { width: 10px; height: 10px; }

@@ -266,7 +266,15 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
       drawText(target, clip, k, W, H, an.chars);
     } else {
       const src = getSource(L);
-      if (src && src.w && src.h) {
+      if (src && src.offline) {
+        target.fillStyle = '#5c1418';
+        target.fillRect(-W / 2, -H / 2, W, H);
+        target.fillStyle = '#ffb3b3';
+        target.font = `600 ${Math.round(H * 0.05)}px "Segoe UI", sans-serif`;
+        target.textAlign = 'center';
+        target.textBaseline = 'middle';
+        target.fillText('Medya çevrimdışı', 0, 0);
+      } else if (src && src.w && src.h) {
         const fit = tr.fit === 'cover' ? Math.max(W / src.w, H / src.h) : tr.fit === 'fill' ? null : Math.min(W / src.w, H / src.h);
         const dw = fit ? src.w * fit : W, dh = fit ? src.h * fit : H;
         const sx = src.w * tr.cropL, sy = src.h * tr.cropT;

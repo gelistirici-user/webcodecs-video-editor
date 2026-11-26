@@ -201,7 +201,7 @@ function updateUndoButtons() {
 
 // ---------- ses ölçerleri ----------
 const meterCanvas = $('#meterCanvas');
-const meterState = [{ v: 0, peak: 0, pt: 0 }, { v: 0, peak: 0, pt: 0 }];
+const meterState = [{ v: -90, peak: -90, pt: 0 }, { v: -90, peak: -90, pt: 0 }];
 function drawMeters() {
   const dpr = window.devicePixelRatio || 1;
   const W = meterCanvas.clientWidth, H = meterCanvas.clientHeight;
@@ -341,6 +341,7 @@ async function importFiles(fileList) {
 }
 async function doImport(items) {
   status(`${items.length} dosya içe aktarılıyor…`);
+  const hadVideo = store.project.media.some((m) => m.kind === 'video');
   const res = await importItems(items);
   if (res.added.length) toast(`${res.added.length} medya eklendi`, 'ok');
   if (res.errors.length) toast('İçe aktarılamadı: ' + res.errors.join(', '), 'err', 6000);
@@ -348,7 +349,7 @@ async function doImport(items) {
   // ilk medya: sekans ayarlarını medyaya uydurmayı öner
   const v = res.added.find((m) => m.kind === 'video');
   const P = store.project;
-  if (v && P.clips.length === 0 && P.media.filter((m) => m.kind === 'video').length === 1 && v.width && (v.width !== P.settings.width || v.height !== P.settings.height || (v.fps && Math.abs(v.fps - P.settings.fps) > 0.5))) {
+  if (v && P.clips.length === 0 && !hadVideo && v.width && (v.width !== P.settings.width || v.height !== P.settings.height || (v.fps && Math.abs(v.fps - P.settings.fps) > 0.5))) {
     const fps = v.fps ? [23.976, 24, 25, 29.97, 30, 50, 60].reduce((a, b) => (Math.abs(b - v.fps) < Math.abs(a - v.fps) ? b : a)) : P.settings.fps;
     const ok = await confirmDialog('Sekans ayarları', `İlk videonuz ${v.width}×${v.height}${v.fps ? ', ' + fps + ' fps' : ''}. Sekans ayarları bu videoya uydurulsun mu?`, 'Uydur');
     if (ok === 'ok') { store.transact('Sekans ayarları', () => { P.settings.width = v.width - (v.width % 2); P.settings.height = v.height - (v.height % 2); P.settings.fps = fps; }); store.emit('resolution'); }
@@ -1167,6 +1168,18 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === '.' && sourceMedia) placeAtPlayhead(store.media(sourceMedia.id), 'overwrite');
   else handled = false;
   if (handled) e.preventDefault();
+});
+// fareyle tıklanan düğmeler odağı tutmasın (Boşluk tuşu düğmeyi yeniden tetiklemesin)
+document.addEventListener('pointerup', (e) => {
+  const b = e.target.closest?.('button, input[type=range], input[type=checkbox]');
+  if (b && !b.closest('.modal, .ctx-menu')) setTimeout(() => b.blur(), 0);
+});
+// ilk klip eklendiğinde zaman çizelgesini sığdır
+let hadClips = false;
+store.on('change', () => {
+  const has = store.project.clips.length > 0;
+  if (has && !hadClips) setTimeout(() => timeline.zoomToFit(), 30);
+  hadClips = has;
 });
 // Electron: kapanırken kaydetme sorusu
 if (isElectron) native.onCloseRequest(async () => { if (await maybeSave()) native.confirmClose(); });

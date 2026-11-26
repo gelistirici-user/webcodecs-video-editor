@@ -105,7 +105,7 @@ export async function exportVideo(opts) {
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
-  const videoSource = new CanvasSource(canvas, { codec: codecs.video, quality: new Quality(bitrate), keyFrameInterval: 2, latencyMode: 'quality' });
+  const videoSource = new CanvasSource(canvas, { codec: codecs.video, quality: new Quality({ bitrate }), keyFrameInterval: 2, latencyMode: 'quality' });
   output.addVideoTrack(videoSource, { frameRate: fps });
 
   let audioBuf = null;
@@ -114,7 +114,7 @@ export async function exportVideo(opts) {
     onProgress?.({ phase: 'audio', progress: 0 });
     audioBuf = await renderAudioMix(P, t0, t1);
     if (audioBuf) {
-      audioSource = new AudioBufferSource({ codec: codecs.audio, quality: new Quality(192000) });
+      audioSource = new AudioBufferSource({ codec: codecs.audio, quality: new Quality({ bitrate: 192000 }) });
       output.addAudioTrack(audioSource);
     }
   }
