@@ -397,7 +397,7 @@ export class Timeline {
     ctx.globalAlpha = 1;
     ctx.fillStyle = '#fff';
     ctx.font = '600 11px "Segoe UI", sans-serif';
-    let label = c.type === 'text' ? 'Metin' : c.type === 'color' ? 'Renk' : c.type === 'seq' ? '▣ ' + store.seqName(c.seqId) : (m?.name || 'Medya');
+    let label = c.type === 'text' ? 'Metin' : c.type === 'color' ? 'Renk' : c.type === 'seq' ? (c.multicam ? `🎥 ${(isAudio ? c.audioAngle : c.angle) + 1 || 1} · ` : '▣ ') + store.seqName(c.seqId) : (m?.name || 'Medya');
     const badges = [];
     if (c.reverse) badges.push('◀');
     if (hasKf(c, 'speed')) badges.push('rampa');

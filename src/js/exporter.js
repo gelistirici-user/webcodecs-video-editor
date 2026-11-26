@@ -4,7 +4,7 @@ import {
   Input, UrlSource, ALL_FORMATS, CanvasSink, getFirstEncodableVideoCodec, getFirstEncodableAudioCodec,
 } from '../vendor/mediabunny.mjs';
 import { store } from './store.js';
-import { layersAt, drawFrame, flatMediaLayers, seqOf } from './compositor.js';
+import { layersAt, drawFrame, flatMediaLayers, seqView } from './compositor.js';
 import { decodeAudio } from './media.js';
 import { native, isElectron } from './platform.js';
 import { clamp, EPS } from './utils.js';
@@ -31,8 +31,8 @@ export async function renderAudioMix(project, t0, t1, sampleRate = 48000, depth 
     let buf = null, m = null, nested = false;
     if (c.type === 'seq') {
       // iç içe sekans: kendi karışımını oluştur (klip aralığı kadar)
-      const inner = depth < 4 ? seqOf(project, c.seqId) : null;
-      if (!inner || inner === project) continue;
+      const inner = depth < 4 ? seqView(project, c, 'audio') : null;
+      if (!inner) continue;
       const a = Math.max(cs, t0), b = Math.min(ce, t1);
       buf = await renderAudioMix({ ...inner, master: 1 }, c.in + (a - cs) * c.speed, c.in + (b - cs) * c.speed, sampleRate, depth + 1);
       if (!buf) continue;

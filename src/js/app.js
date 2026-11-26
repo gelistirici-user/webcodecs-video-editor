@@ -13,6 +13,8 @@ import { normalizeSelected, duckDialog, silenceDialog } from './tools.js';
 import { transcribeDialog, exportSrt, importSrtDialog } from './subtitles.js';
 import { buildSeqTabs, openSequence, newSequence, nestSelection } from './sequences.js';
 import { createProxies, removeProxy, proxyState, setUseProxy, validateProxies } from './proxy.js';
+import { multicamDialog, switchAngle, multicamAt } from './multicam.js';
+import { MC } from './compositor.js';
 import { h, clamp, formatTC, formatDur, parseTC, debounce, uid, EPS } from './utils.js';
 import { icon, contextMenu, toast, modal, confirmDialog, promptDialog } from './ui.js';
 
@@ -207,6 +209,15 @@ store.on('selection', drawOverlay);
 store.on('playhead', () => { if (!player.playing) drawOverlay(); });
 store.on('change', (d) => { if (!d?.live) drawOverlay(); });
 store.on('transport', drawOverlay);
+// çok kamera ızgarasında kareye tıklayınca o açıya geç
+frame.addEventListener('pointerdown', (e) => {
+  if (monMode !== 'multicam' || !player.mcLayout) return;
+  const r = frame.getBoundingClientRect();
+  const { cols, rows, n } = player.mcLayout;
+  const i = Math.floor(((e.clientY - r.top) / r.height) * rows) * cols + Math.floor(((e.clientX - r.left) / r.width) * cols);
+  if (i < n) { switchAngle(i); player.requestRender(); }
+  e.stopImmediatePropagation();
+}, true);
 // monitöre tıklayınca klip seç
 frame.addEventListener('pointerdown', (e) => {
   if (e.target !== programCanvas && e.target !== overlay) return;
@@ -233,9 +244,9 @@ frame.addEventListener('pointerdown', (e) => {
 function updateTimecodes() {
   const fps = store.fps;
   const tc = formatTC(store.playhead, fps);
-  if (document.activeElement !== $('#tcCurrent') && monMode === 'program') $('#tcCurrent').value = tc;
+  if (document.activeElement !== $('#tcCurrent') && monMode !== 'source') $('#tcCurrent').value = tc;
   $('#tlTc').textContent = tc;
-  if (monMode === 'program') {
+  if (monMode !== 'source') {
     const d = store.duration();
     $('#tcDuration').textContent = formatTC(d, fps);
     $('#tcDuration').title = 'Sekans süresi';
@@ -585,8 +596,10 @@ function setMonitor(mode) {
   $('#sourceScrub').hidden = !src;
   $('#srcActions').hidden = !src;
   $('#tLoop').hidden = src;
+  MC.allAngles = mode === 'multicam';
+  if (mode === 'multicam' && !multicamAt(store.playhead)) toast('Oynatma kafası altında çok kameralı klip yok (Araçlar > Çok kameralı kaynak oluştur)', 'info', 3500);
   if (src) { player.pause(); $('#monTitle').textContent = sourceMedia?.name || ''; }
-  else { srcVideo.pause(); $('#monTitle').textContent = ''; layoutMonitor(); }
+  else { srcVideo.pause(); $('#monTitle').textContent = mode === 'multicam' ? 'Çok kamera: 1–9 ile kes' : ''; layoutMonitor(); player.requestRender(); }
   updateTimecodes();
   updateSourceUI();
 }
@@ -1160,6 +1173,8 @@ const MENUS = {
     { label: 'Normalleştir: ses yüksekliği -14 LUFS', disabled: !store.selection.size, action: () => normalizeSelected('lufs') },
     { label: 'Otomatik ducking (müziği kıs)…', action: duckDialog },
     '-',
+    { label: 'Çok kameralı kaynak oluştur…', action: multicamDialog },
+    '-',
     { label: 'Tüm videolar için proxy oluştur', action: () => createProxies(store.project.media.filter((m) => m.kind === 'video' && !m.proxy)) },
     { label: (proxyState.use ? '✓ ' : '') + 'Önizlemede proxy kullan', action: () => { setUseProxy(!proxyState.use); updateProxyBtn(); } },
     '-',
@@ -1279,6 +1294,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === '\\') timeline.zoomToFit();
   else if (e.key === '`') toggleFullscreen();
   else if (e.key === '?') shortcutsDialog();
+  else if (/^[1-9]$/.test(e.key) && monMode === 'multicam') { if (switchAngle(+e.key - 1)) { status('Kamera ' + e.key); player.requestRender(); } }
   else if (e.key === ',' && sourceMedia) placeAtPlayhead(store.media(sourceMedia.id), 'insert');
   else if (e.key === '.' && sourceMedia) placeAtPlayhead(store.media(sourceMedia.id), 'overwrite');
   else handled = false;

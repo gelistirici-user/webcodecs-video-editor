@@ -1,6 +1,6 @@
 // Oynatma motoru: video/ses öğe havuzu, saat, ses ölçerleri
 import { store } from './store.js';
-import { layersAt, drawFrame, audioGain, collectInstances } from './compositor.js';
+import { layersAt, drawFrame, audioGain, collectInstances, seqView, MC } from './compositor.js';
 import { clamp, EPS } from './utils.js';
 import { buildChain, ensureWorklet, afxActive } from './audiofx.js';
 import { previewUrl } from './proxy.js';
@@ -280,7 +280,55 @@ export class Player {
       return { el: e.el, w: e.el.videoWidth, h: e.el.videoHeight };
     });
     if (layers.length === 0 && P.clips.length === 0) this.drawEmpty(W, H);
+    if (MC.allAngles) this.drawMulticamGrid(t, mm, playing);
     this.onFrame?.(t, layers);
+  }
+
+  // Çok kameralı ızgara: oynatma kafasındaki çok kameralı klibin tüm açıları
+  drawMulticamGrid(t, mm, playing) {
+    const P = store.project;
+    const vts = store.videoTracks();
+    let c = null;
+    for (let i = vts.length - 1; i >= 0 && !c; i--) c = P.clips.find((x) => x.trackId === vts[i].id && x.multicam && t >= x.start - EPS && t < x.start + x.duration - EPS) || null;
+    const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
+    this.mcLayout = null;
+    if (!c) return;
+    const all = seqView(P, c, 'video', true);
+    if (!all) return;
+    const angles = all.tracks.filter((x) => x.kind === 'video');
+    const n = angles.length, cols = n <= 1 ? 1 : n <= 4 ? 2 : 3, rows = Math.ceil(n / cols);
+    const tw = W / cols, th = H / rows;
+    const ti = srcTimeAt(c, t);
+    if (!this.tile || this.tile.width !== Math.round(tw) || this.tile.height !== Math.round(th)) { this.tile = document.createElement('canvas'); this.tile.width = Math.round(tw); this.tile.height = Math.round(th); }
+    const tctx = this.tile.getContext('2d');
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    angles.forEach((tr, i) => {
+      const view = { ...all, tracks: [tr], clips: all.clips.filter((k) => k.trackId === tr.id) };
+      const pk = c.id + '/';
+      const layers = layersAt(view, ti, mm).map((L) => (L.clip ? { ...L, poolKey: pk + L.clip.id } : L));
+      drawFrame(tctx, this.tile.width, this.tile.height, view, ti, layers, (L) => {
+        const m = mm.get(L.clip.mediaId);
+        const e = this.pool.get(L.poolKey);
+        if (!m || !e || e.el.readyState < 2) return null;
+        return { el: e.el, w: e.el.videoWidth, h: e.el.videoHeight };
+      });
+      const x = (i % cols) * tw, y = Math.floor(i / cols) * th;
+      ctx.drawImage(this.tile, x, y, tw, th);
+      const on = (c.angle || 0) === i;
+      ctx.lineWidth = on ? Math.max(3, W / 300) : 1;
+      ctx.strokeStyle = on ? (playing ? '#ff3b3b' : '#ffd34d') : 'rgba(255,255,255,0.25)';
+      ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, tw - ctx.lineWidth, th - ctx.lineWidth);
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      const fs = Math.max(11, Math.round(H / 28));
+      ctx.font = `600 ${fs}px "Segoe UI", sans-serif`;
+      const label = `${i + 1}  ${tr.name}`;
+      ctx.fillRect(x + 6, y + 6, ctx.measureText(label).width + 12, fs + 8);
+      ctx.fillStyle = '#fff'; ctx.textBaseline = 'top'; ctx.fillText(label, x + 12, y + 10);
+    });
+    ctx.restore();
+    this.mcLayout = { cols, rows, n };
   }
 
   drawEmpty(W, H) {

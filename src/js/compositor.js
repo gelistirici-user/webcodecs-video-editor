@@ -58,6 +58,22 @@ export function seqOf(P, id) {
   return q ? { ...P, tracks: q.tracks, clips: q.clips, markers: q.markers || [] } : null;
 }
 
+// Çok kameralı ızgara görünümü açıkken tüm açılar hazırlanır
+export const MC = { allAngles: false };
+
+// İç içe klibin gördüğü sekans: çok kameralı klipte yalnızca seçili açı (görüntü) / ses açısı
+export function seqView(P, c, kind, all = false) {
+  const inner = seqOf(P, c.seqId);
+  if (!inner || inner === P) return null;
+  if (!c.multicam) return inner;
+  const vt = inner.tracks.filter((t) => t.kind === 'video'), at = inner.tracks.filter((t) => t.kind === 'audio');
+  let keep;
+  if (kind === 'audio') keep = [at.find((t) => t.angle === (c.audioAngle ?? 0)) || at[0]];
+  else keep = all ? vt : [vt[clamp(c.angle || 0, 0, vt.length - 1)]];
+  const ids = new Set(keep.filter(Boolean).map((t) => t.id));
+  return { ...inner, tracks: inner.tracks.filter((t) => ids.has(t.id)).map((t) => ({ ...t, hidden: false, muted: false, solo: false })), clips: inner.clips.filter((k) => ids.has(k.trackId)) };
+}
+
 /**
  * t anında (ve yakınında) oynatılması gereken tüm medya örnekleri; iç içe sekanslara iner.
  * { key, clip, kind: 'video'|'audio', t (kendi sekansındaki zaman), active, gain (üst kazançlar) }
@@ -76,8 +92,8 @@ export function collectInstances(P, t, ahead = 1.5, prefix = '', depth = 0, pare
     if (tr.kind === 'audio') g *= tr.muted || (solo && !tr.solo) ? 0 : tr.volume ?? 1;
     if (c.type === 'seq') {
       if (depth >= 4) continue;
-      const inner = seqOf(P, c.seqId);
-      if (!inner || inner === P) continue;
+      const inner = seqView(P, c, tr.kind, MC.allAngles && c.multicam);
+      if (!inner) continue;
       const ti = srcTimeAt(c, clamp(t, c.start, c.start + c.duration - 1e-3));
       if (tr.kind === 'audio') g *= audioGain(c, clamp(t, c.start, c.start + c.duration));
       out.push(...collectInstances(inner, ti, active ? ahead : 0.1, prefix + c.id + '/', depth + 1, g, tr.kind, active));
@@ -96,8 +112,8 @@ export function flatMediaLayers(P, t, mm, prefix = '', depth = 0) {
     if (!L.clip) continue;
     if (L.clip.type === 'media') out.push({ ...L, poolKey: prefix + L.clip.id });
     else if (L.clip.type === 'seq' && depth < 4) {
-      const inner = seqOf(P, L.clip.seqId);
-      if (inner && inner !== P) out.push(...flatMediaLayers(inner, L.srcTime, mm, prefix + L.clip.id + '/', depth + 1));
+      const inner = seqView(P, L.clip, 'video');
+      if (inner) out.push(...flatMediaLayers(inner, L.srcTime, mm, prefix + L.clip.id + '/', depth + 1));
     }
   }
   return out;
@@ -299,8 +315,8 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource, { depth = 0,
     // iç içe sekans: önce kendi tuvaline çiz (katman tuvalleri derinliğe göre ayrı)
     let nested = null;
     if (clip.type === 'seq' && depth < 4) {
-      const inner = seqOf(project, clip.seqId);
-      if (inner && inner !== project) {
+      const inner = seqView(project, clip, 'video');
+      if (inner) {
         if (!mm) mm = new Map(project.media.map((m) => [m.id, m]));
         const oc = getNestCanvas(W, H, depth + 1);
         const pk = (L.poolKey || L.clip.id) + '/';
