@@ -1088,7 +1088,7 @@ async function runExport(opts) {
 // ---------- ayarlar / yardım ----------
 const SHORTCUTS = [
   ['Oynatma', [['Boşluk', 'Oynat / Duraklat'], ['J / K / L', 'Geri / Dur / İleri (tekrar: hızlan)'], ['← / →', 'Kare geri / ileri (Shift: 1 sn)'], ['↑ / ↓', 'Önceki / sonraki kesme noktası'], ['Home / End', 'Başa / sona git'], ['I / O', 'Giriş / çıkış noktası'], ['Alt+X', 'Giriş/çıkışı temizle'], ['Ctrl+L', 'Döngü']]],
-  ['Kurgu', [['V', 'Seçim aracı'], ['C', 'Jilet aracı'], ['Ctrl+K', 'Oynatma kafasında böl'], ['Q / W', 'Başı / sonu oynatma kafasına kırp (dalgalı)'], ['Delete', 'Sil'], ['Shift+Delete', 'Dalgalı sil'], [', / .', 'Kaynaktan ekle / üzerine yaz'], ['Alt+sürükle', 'Kopyalayarak taşı'], ['Ctrl+bırak', 'Ekleyerek bırak (sonrakileri kaydırır)'], ['S', 'Yakalamayı aç/kapat'], ['M', 'İşaretçi ekle'], ['Ctrl+R', 'Hız / süre'], ['Shift+E', 'Klibi etkinleştir / devre dışı']]],
+  ['Kurgu', [['V', 'Seçim aracı'], ['C', 'Jilet aracı'], ['Ctrl+K', 'Oynatma kafasında böl'], ['Q / W', 'Başı / sonu oynatma kafasına kırp (dalgalı)'], ['Delete', 'Sil'], ['Shift+Delete', 'Dalgalı sil'], [', / .', 'Kaynaktan ekle / üzerine yaz'], ['Alt+sürükle', 'Kopyalayarak taşı'], ['Ctrl+bırak', 'Ekleyerek bırak (sonrakileri kaydırır)'], ['S', 'Yakalamayı aç/kapat'], ['M', 'İşaretçi ekle'], ['Ctrl+R', 'Hız / süre'], ['Shift+E', 'Klibi etkinleştir / devre dışı'], ['1–9', 'Çok Kamera sekmesinde açı değiştir']]],
   ['Düzen', [['Ctrl+Z', 'Geri al'], ['Ctrl+Shift+Z / Ctrl+Y', 'Yinele'], ['Ctrl+C / X / V', 'Kopyala / Kes / Yapıştır'], ['Ctrl+D', 'Çoğalt'], ['Ctrl+A', 'Tümünü seç'], ['Esc', 'Seçimi kaldır']]],
   ['Görünüm ve Dosya', [['+ / −', 'Zaman çizelgesi yakınlaştır'], ['\\', 'Tümünü sığdır'], ['Ctrl+tekerlek', 'İmleç etrafında yakınlaştır'], ['Alt+1 / 2 / 3', 'Kurgu / Renk / Teslim'], ['`', 'Monitör tam ekran'], ['Ctrl+N / O / S', 'Yeni / Aç / Kaydet'], ['Ctrl+I', 'Medya içe aktar'], ['Ctrl+M', 'Dışa aktar'], ['F12', 'Geliştirici araçları']]],
 ];
@@ -1098,8 +1098,8 @@ function shortcutsDialog() {
 }
 function aboutDialog() {
   modal({ title: 'Kurgu Studio hakkında', width: 420, body: h('div', { class: 'about' },
-    h('p', {}, h('b', {}, 'Kurgu Studio 1.0'), ' — Premiere Pro ve DaVinci Resolve\'dan esinlenen, hafif bir masaüstü video editörü.'),
-    h('p', { class: 'muted-p' }, 'Electron + saf JavaScript. Kodlama: WebCodecs (donanım hızlandırmalı), kapsayıcı: mediabunny.'),
+    h('p', {}, h('b', {}, 'Kurgu Studio 2.0'), ' — Premiere Pro ve DaVinci Resolve\'dan esinlenen, hafif bir masaüstü video editörü.'),
+    h('p', { class: 'muted-p' }, 'Electron + saf JavaScript. Kodlama: WebCodecs (donanım hızlandırmalı), kapsayıcı: mediabunny, konuşma tanıma: Whisper (transformers.js).'),
     h('p', { class: 'muted-p' }, 'Projeler .kurgu dosyası olarak kaydedilir; medya dosyalarına bağlantı tutulur, kopyalanmaz.')) });
 }
 function setPage(p) {

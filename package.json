@@ -1,7 +1,7 @@
 {
   "name": "kurgu-studio",
   "productName": "Kurgu Studio",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Premiere Pro ve DaVinci Resolve'dan esinlenen hafif, masaüstü video editörü",
   "main": "main.js",
   "author": "gelistirici-user",
