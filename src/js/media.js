@@ -54,14 +54,25 @@ export async function probe(item) {
   return info;
 }
 
+// Dosya boyutu (dışa aktarmada "kaynağa yakın" bit hızını hesaplamak için)
+async function fileSize(it) {
+  try {
+    if (it.file) return it.file.size;
+    if (it.path && window.native) return (await window.native.stat(it.path))?.size || null;
+    const r = await fetch(it.url, { method: 'HEAD' });
+    return parseInt(r.headers.get('content-length'), 10) || null;
+  } catch { return null; }
+}
+
 export async function importItems(items) {
   const added = [];
   const errors = [];
   for (const it of items) {
     try {
       const info = await probe(it);
+      const size = await fileSize(it);
       const m = {
-        id: uid('m'), name: it.name, path: it.path, url: it.url, kind: it.kind,
+        id: uid('m'), name: it.name, size, path: it.path, url: it.url, kind: it.kind,
         duration: info.duration || 0, width: info.width, height: info.height, hasAudio: !!info.hasAudio, fps: info.fps || null,
         srcIn: null, srcOut: null, offline: false,
       };
@@ -87,7 +98,7 @@ export function buildCache(m) {
       cache.image = img;
       const c = document.createElement('canvas');
       c.height = THUMB_H; c.width = Math.round(THUMB_H * (img.naturalWidth / img.naturalHeight || 1.77));
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      c.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, c.width, c.height);
       cache.poster = c;
       cache.thumbs = [{ t: 0, c }];
       store.emit('media-cache', m.id);
@@ -112,7 +123,7 @@ async function makeThumbs(m, cache) {
       if (wc) {
         const c = document.createElement('canvas');
         c.width = w; c.height = THUMB_H;
-        c.getContext('2d').drawImage(wc.canvas, 0, 0);
+        c.getContext('2d', { willReadFrequently: true }).drawImage(wc.canvas, 0, 0);
         cache.thumbs.push({ t: times[i], c });
         if (!cache.poster) cache.poster = c;
         if (i % 6 === 0) store.emit('media-cache', m.id);
@@ -130,7 +141,7 @@ async function makeThumbs(m, cache) {
       await new Promise((r) => { v.onseeked = r; setTimeout(r, 1500); });
       const c = document.createElement('canvas');
       c.width = w; c.height = THUMB_H;
-      c.getContext('2d').drawImage(v, 0, 0, w, THUMB_H);
+      c.getContext('2d', { willReadFrequently: true }).drawImage(v, 0, 0, w, THUMB_H);
       cache.thumbs.push({ t, c });
       if (!cache.poster) cache.poster = c;
     }

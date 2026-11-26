@@ -185,6 +185,7 @@ class Store {
     if (t <= clip.start + EPS || t >= clip.start + clip.duration - EPS) return null;
     const right = JSON.parse(JSON.stringify(clip));
     right.id = uid('c');
+    right.linkId = null; // bağlantıyı çağıran taraf (splitAt) yeniden kurar
     const cut = t - clip.start;
     right.start = t;
     right.in = clip.in + cut * clip.speed;
@@ -294,12 +295,17 @@ class Store {
     if (mode === 'insert') {
       const tracks = [vTrack, aTrack].filter(Boolean);
       // ekleme: oynatma kafasından sonraki klipleri ilgili izlerde kaydır
+      // (liste kopyası üzerinde dön: bölmeden doğan sağ parçalar ikinci kez kaydırılmasın)
+      const relink = new Map();
       for (const t of tracks) {
-        for (const c of P.clips) {
+        for (const c of [...P.clips]) {
           if (c.trackId !== t.id) continue;
           if (c.start < start - EPS && c.start + c.duration > start + EPS) {
             const r = this.splitClip(c, start);
-            if (r) r.start += dur;
+            if (r) {
+              r.start += dur;
+              if (c.linkId) { if (!relink.has(c.linkId)) relink.set(c.linkId, uid('l')); r.linkId = relink.get(c.linkId); }
+            }
           } else if (c.start >= start - EPS) c.start += dur;
         }
       }

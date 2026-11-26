@@ -354,13 +354,16 @@ export class Inspector {
       this.colorRow(b, 'Arka plan', () => S.background, (v) => (S.background = v));
       this.numRow(b, 'Ana ses', { get: () => P.master ?? 1, set: (v) => (P.master = v), min: 0, max: 2, step: 0.5, suffix: '%', def: 1, display: (v) => v * 100, parse: (v) => clamp(v / 100, 0, 2), history: 'Ana ses' });
     });
-    const d = store.duration();
     this.section('stats', 'Özet', (b) => {
+      const dd = [h('dd'), h('dd'), h('dd'), h('dd')];
+      const upd = () => {
+        const Q = store.project;
+        [formatTC(store.duration(), Q.settings.fps), Q.clips.length, Q.media.length, Q.markers.length].forEach((v, i) => { dd[i].textContent = String(v); });
+      };
+      upd();
+      this.refreshers.push(upd);
       b.append(h('dl', { class: 'stats' },
-        h('dt', {}, 'Süre'), h('dd', {}, formatTC(d, S.fps)),
-        h('dt', {}, 'Klip'), h('dd', {}, String(P.clips.length)),
-        h('dt', {}, 'Medya'), h('dd', {}, String(P.media.length)),
-        h('dt', {}, 'İşaretçi'), h('dd', {}, String(P.markers.length))));
+        h('dt', {}, 'Süre'), dd[0], h('dt', {}, 'Klip'), dd[1], h('dt', {}, 'Medya'), dd[2], h('dt', {}, 'İşaretçi'), dd[3]));
       b.append(h('p', { class: 'hint' }, 'Bir klip seçerek özelliklerini burada düzenleyebilirsiniz.'));
     });
   }

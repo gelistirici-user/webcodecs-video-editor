@@ -205,7 +205,8 @@ input[type=number].inp { -moz-appearance: textfield; }
 .safe-t { position: absolute; inset: 10%; border: 1px dashed rgba(255,211,77,.4); }
 .safe::after { content: ''; position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; transform: translate(-50%,-50%); background: linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,.35)) center/1px 100% no-repeat, linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,.35)) center/100% 1px no-repeat; }
 .source-view { position: absolute; inset: 8px; display: grid; place-items: center; background: #000; border-radius: 3px; }
-.source-view video { max-width: 100%; max-height: 100%; }
+.source-view { overflow: hidden; }
+.source-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .source-empty { position: absolute; color: var(--tx3); text-align: center; padding: 20px; max-width: 320px; }
 .scrub { height: 14px; margin: 0 12px; position: relative; background: var(--bg2); border-radius: 3px; cursor: pointer; flex: none; }
 .scrub-range { position: absolute; top: 0; bottom: 0; background: rgba(76,141,255,.35); border-left: 2px solid var(--acc); border-right: 2px solid var(--acc); }
@@ -221,6 +222,8 @@ input[type=number].inp { -moz-appearance: textfield; }
 .src-actions { display: inline-flex; gap: 4px; margin-left: 8px; }
 .scopes { display: none; width: 100%; max-width: 900px; height: 190px; background: var(--bg1); border: 1px solid var(--line); border-radius: 6px; margin-top: auto; flex: none; flex-direction: column; overflow: hidden; }
 .page-color .scopes { display: flex; }
+.stage.scopes-side { flex-direction: row; justify-content: center; align-items: center; gap: 8px; }
+.stage.scopes-side .scopes { margin-top: 0; max-width: none; }
 .scopes-head { display: flex; justify-content: center; padding: 4px; border-bottom: 1px solid var(--line); }
 .scopes canvas { flex: 1; width: 100%; min-height: 0; }
 

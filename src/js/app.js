@@ -44,14 +44,33 @@ const frame = $('#frame');
 const stage = $('#stage');
 function layoutMonitor() {
   const S = store.project.settings;
-  const scopesH = page === 'color' ? $('#scopesBox').offsetHeight + 8 : 0;
-  const availW = stage.clientWidth - 16, availH = stage.clientHeight - 16 - scopesH;
   const ar = S.width / S.height;
-  let w = availW, hh = w / ar;
-  if (hh > availH) { hh = availH; w = hh * ar; }
-  w = Math.max(10, Math.floor(w)); hh = Math.max(10, Math.floor(hh));
+  const W0 = stage.clientWidth - 16, H0 = stage.clientHeight - 16;
+  const fit = (aw, ah) => {
+    let fw = aw, fh = fw / ar;
+    if (fh > ah) { fh = ah; fw = fh * ar; }
+    return [Math.max(10, Math.floor(fw)), Math.max(10, Math.floor(fh))];
+  };
+  const sb = $('#scopesBox');
+  let w, hh, side = false, top = 0;
+  if (page === 'color') {
+    // Ölçümler: monitöre en çok yer bırakan yerleşimi seç (alt veya yan)
+    const SCOPE_H = 198;
+    const stacked = fit(W0, H0 - SCOPE_H);
+    const sw = clamp(Math.round(W0 * 0.4), 240, 520);
+    const sideFit = fit(W0 - sw - 8, H0);
+    side = sideFit[0] * sideFit[1] > stacked[0] * stacked[1];
+    [w, hh] = side ? sideFit : stacked;
+    sb.style.width = side ? sw + 'px' : '';
+    sb.style.height = side ? Math.max(170, hh) + 'px' : '';
+    top = side ? 0 : Math.max(0, (H0 - SCOPE_H - hh) / 2);
+  } else {
+    [w, hh] = fit(W0, H0);
+    top = Math.max(0, (H0 - hh) / 2);
+  }
+  stage.classList.toggle('scopes-side', side);
   frame.style.width = w + 'px'; frame.style.height = hh + 'px';
-  frame.style.marginTop = Math.max(0, (availH - hh) / 2) + 'px';
+  frame.style.marginTop = top + 'px';
   const dpr = window.devicePixelRatio || 1;
   const q = parseFloat($('#monQuality').value);
   const cw = Math.min(S.width, Math.round(w * dpr)) * q, ch = Math.round((cw / S.width) * S.height);
@@ -277,7 +296,7 @@ function renderMediaList() {
   for (const m of items) {
     const cache = store.mediaCache.get(m.id);
     const thumb = h('div', { class: 'pm-thumb' + (m.kind === 'audio' ? ' audio' : '') });
-    if (cache?.poster) { const c = cache.poster; const img = h('canvas', { width: c.width, height: c.height }); img.getContext('2d').drawImage(c, 0, 0); thumb.append(img); }
+    if (cache?.poster) { const c = cache.poster; const img = h('canvas', { width: c.width, height: c.height }); img.getContext('2d', { willReadFrequently: true }).drawImage(c, 0, 0); thumb.append(img); }
     else thumb.innerHTML = icon(m.kind === 'audio' ? 'music' : m.kind === 'image' ? 'image' : 'film', 28);
     if (m.kind !== 'image') thumb.append(h('span', { class: 'pm-dur' }, formatDur(m.duration)));
     if (m.offline) thumb.append(h('span', { class: 'pm-offline' }, 'Çevrimdışı'));
@@ -889,14 +908,25 @@ function exportDialog() {
   const offline = P.clips.filter((c) => c.type === 'media' && store.media(c.mediaId)?.offline).length;
   if (offline) toast(`${offline} klibin medyası çevrimdışı; bu klipler çıktıda boş görünecek. Medya panelinden yeniden bağlayabilirsiniz.`, 'warn', 6000);
   const hasRange = P.inPoint != null || P.outPoint != null;
-  const nameInp = h('input', { class: 'inp', value: P.name, 'aria-label': 'Dosya adı' });
+  // Varsayılan dosya adı: proje adsızsa en uzun kullanılan videonun adı
+  const usage = new Map();
+  for (const c of P.clips) {
+    const m = c.type === 'media' && store.media(c.mediaId);
+    if (m && m.kind === 'video' && store.track(c.trackId)?.kind === 'video') usage.set(m, (usage.get(m) || 0) + c.duration);
+  }
+  const mainMedia = [...usage.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  const defName = P.name && P.name !== 'Adsız Proje' ? P.name : mainMedia ? mainMedia.name.replace(/\.[^.]+$/, '') : P.name;
+  // Kaynak bit hızı (dosya boyutu biliniyorsa)
+  const srcBr = mainMedia?.size && mainMedia.duration ? (mainMedia.size * 8) / mainMedia.duration : null;
+  const nameInp = h('input', { class: 'inp', value: defName, 'aria-label': 'Dosya adı' });
   const fmt = h('select', { class: 'inp' }, h('option', { value: 'mp4' }, 'MP4 (H.264 + AAC) — önerilen'), h('option', { value: 'webm' }, 'WebM (VP9 + Opus)'));
   const res = h('select', { class: 'inp' });
   const resOpts = [[1, `Sekans (${S.width}×${S.height})`], [0.5, `Yarım (${Math.round(S.width / 2)}×${Math.round(S.height / 2)})`]];
   if (S.width < 3840 && S.height <= 1080 && S.width >= S.height) resOpts.push([3840 / S.width, `4K (${3840}×${Math.round(S.height * 3840 / S.width)})`]);
   if (S.width > 1280) resOpts.push([1280 / S.width, `720p (1280×${Math.round(S.height * 1280 / S.width)})`]);
   resOpts.forEach(([v, l]) => res.append(h('option', { value: v }, l)));
-  const qual = h('select', { class: 'inp' }, h('option', { value: 'high' }, 'Yüksek'), h('option', { value: 'medium' }, 'Orta'), h('option', { value: 'low' }, 'Düşük (küçük dosya)'), h('option', { value: 'custom' }, 'Özel bit hızı'));
+  const srcTarget = srcBr ? Math.max(3e6, srcBr * 1.3) : null;
+  const qual = h('select', { class: 'inp' }, srcTarget && h('option', { value: 'source' }, `Kaynağa yakın (~${(srcTarget / 1e6).toFixed(1)} Mbps)`), h('option', { value: 'high', selected: true }, 'Yüksek'), h('option', { value: 'medium' }, 'Orta'), h('option', { value: 'low' }, 'Düşük (küçük dosya)'), h('option', { value: 'custom' }, 'Özel bit hızı'));
   const mbps = h('input', { class: 'inp', type: 'number', min: 1, max: 200, value: 20, 'aria-label': 'Mbps' });
   const mbpsRow = h('label', { class: 'field hidden' }, h('span', {}, 'Bit hızı (Mbps)'), mbps);
   const range = h('select', { class: 'inp' }, h('option', { value: 'all' }, `Tüm sekans (${formatTC(dur, S.fps)})`));
@@ -907,7 +937,7 @@ function exportDialog() {
     const k = parseFloat(res.value);
     const w = Math.round(S.width * k / 2) * 2, hh = Math.round(S.height * k / 2) * 2;
     const base = (w * hh) / (1920 * 1080) * (S.fps / 30);
-    const br = qual.value === 'custom' ? parseFloat(mbps.value) * 1e6 : { high: 16e6, medium: 9e6, low: 4e6 }[qual.value] * Math.max(0.25, base);
+    const br = qual.value === 'custom' ? parseFloat(mbps.value) * 1e6 : qual.value === 'source' ? srcTarget * Math.max(0.25, Math.min(1, base)) : { high: 16e6, medium: 9e6, low: 4e6 }[qual.value] * Math.max(0.25, base);
     const [a, b] = range.value === 'io' ? [P.inPoint ?? 0, P.outPoint ?? dur] : [0, dur];
     mbpsRow.classList.toggle('hidden', qual.value !== 'custom');
     return { w, h: hh, bitrate: Math.round(br), a, b };
@@ -1007,8 +1037,22 @@ function setPage(p) {
   document.body.className = 'page-' + p;
   $$('.page-tab').forEach((b) => { b.classList.toggle('on', b.dataset.page === p); b.setAttribute('aria-selected', String(b.dataset.page === p)); });
   scopes.active = p === 'color';
+  if (p === 'color') followPlayheadClip();
   inspector.setPage(p);
   setTimeout(() => { layoutMonitor(); scopes.update(true); timeline.request(); }, 30);
+}
+// Renk sayfası: seçim yoksa (veya tek seçili klip oynatma kafasının dışındaysa) kafanın altındaki en üst görüntü klibini seç
+function followPlayheadClip() {
+  const sel = store.selectedClips();
+  if (sel.length > 1) return;
+  const t = store.playhead;
+  const under = (c) => t >= c.start - EPS && t < c.start + c.duration - EPS;
+  if (sel.length === 1 && under(sel[0]) && store.track(sel[0].trackId)?.kind === 'video') return;
+  const tracks = store.videoTracks();
+  for (let i = tracks.length - 1; i >= 0; i--) {
+    const c = store.project.clips.find((x) => x.trackId === tracks[i].id && under(x) && !x.muted);
+    if (c) { store.select([c.id, ...(c.linkId ? store.project.clips.filter((x) => x.linkId === c.linkId && x.id !== c.id).map((x) => x.id) : [])]); return; }
+  }
 }
 $$('.page-tab').forEach((b) => b.addEventListener('click', () => setPage(b.dataset.page)));
 $$('[data-scope]').forEach((b) => b.addEventListener('click', () => {
@@ -1017,7 +1061,7 @@ $$('[data-scope]').forEach((b) => b.addEventListener('click', () => {
   scopes.update(true);
 }));
 store.on('change', () => { if (page === 'color' && !player.playing) setTimeout(() => scopes.update(true), 40); });
-store.on('playhead', () => { if (page === 'color' && !player.playing) setTimeout(() => scopes.update(true), 60); });
+store.on('playhead', () => { if (page === 'color' && !player.playing) { followPlayheadClip(); setTimeout(() => scopes.update(true), 60); } });
 
 // ---------- menüler ----------
 const MENUS = {
@@ -1112,8 +1156,9 @@ $$('.resizer').forEach((r) => r.addEventListener('pointerdown', (e) => {
   const up = () => { r.classList.remove('active'); r.removeEventListener('pointermove', mv); r.removeEventListener('pointerup', up); localStorage.setItem('kurgu.layout', JSON.stringify(layout)); };
   r.addEventListener('pointermove', mv);
   r.addEventListener('pointerup', up);
-  r.addEventListener('dblclick', () => { layout[key] = LAYOUT_DEF[key]; applyLayout(); localStorage.setItem('kurgu.layout', JSON.stringify(layout)); }, { once: true });
 }));
+// çift tık: panel boyutunu varsayılana döndür
+$$('.resizer').forEach((r) => r.addEventListener('dblclick', () => { const key = r.dataset.resize; layout[key] = LAYOUT_DEF[key]; applyLayout(); localStorage.setItem('kurgu.layout', JSON.stringify(layout)); }));
 
 // ---------- klavye ----------
 document.addEventListener('keydown', (e) => {
@@ -1193,6 +1238,11 @@ else window.addEventListener('beforeunload', (e) => { if (store.dirty && store.p
 
 // dışarıdan erişim (zaman çizelgesi bağlam menüsü için)
 window.kurgu = { importFiles, splitAtPlayhead, cut, copy, paste, duplicate, deleteSelection, speedDialog, addMarker, toggleClipEnabled, store, player, timeline };
+
+// GPU sıfırlanırsa (sürücü zaman aşımı, uykudan dönüş) GPU tuvallerinin içeriği silinir: yeniden çiz
+for (const c of [$('#programCanvas'), $('.tl-canvas'), $('.tl-ruler'), $('#scopeCanvas')]) {
+  c?.addEventListener('contextrestored', () => { player.requestRender(); timeline.request(); scopes.update(true); });
+}
 
 // ---------- başlat ----------
 buildMediaPanel();

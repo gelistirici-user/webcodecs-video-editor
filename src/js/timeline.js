@@ -40,7 +40,12 @@ export class Timeline {
     store.on('playhead', () => { this.followPlayhead(); this.request(); });
     store.on('media-cache', () => this.request());
     store.on('load', () => { this.scroller.scrollLeft = 0; this.zoomToFit(); });
-    new ResizeObserver(() => this.request()).observe(this.scroller);
+    this._availH = this.scroller.clientHeight;
+    new ResizeObserver(() => {
+      const hh = this.scroller.clientHeight;
+      if (Math.abs(hh - this._availH) > 2) { this._availH = hh; this.buildHeaders(); }
+      this.request();
+    }).observe(this.scroller);
     this.buildHeaders();
   }
 
@@ -50,11 +55,15 @@ export class Timeline {
     const v = P.tracks.filter((t) => t.kind === 'video').reverse();
     const a = P.tracks.filter((t) => t.kind === 'audio');
     const out = [];
+    // Küçük ekranlarda izleri sığacak kadar daralt (alt sınır: okunabilir yükseklik)
+    const full = v.length * ROW_H.video + 6 + a.length * ROW_H.audio;
+    const k = this._availH ? clamp((this._availH - 14) / full, 0.62, 1) : 1;
+    const vh = Math.round(ROW_H.video * k), ah = Math.round(ROW_H.audio * k);
     let y = 0;
-    for (const t of v) { out.push({ track: t, y, h: ROW_H.video }); y += ROW_H.video; }
+    for (const t of v) { out.push({ track: t, y, h: vh }); y += vh; }
     y += 6; // video/ses ayırıcı
-    for (const t of a) { out.push({ track: t, y, h: ROW_H.audio }); y += ROW_H.audio; }
-    this._splitY = v.length * ROW_H.video;
+    for (const t of a) { out.push({ track: t, y, h: ah }); y += ah; }
+    this._splitY = v.length * vh;
     return out;
   }
   rowAt(y) { return this.rows().find((r) => y >= r.y && y < r.y + r.h) || null; }
@@ -405,7 +414,7 @@ export class Timeline {
     if (this.hover?.clip?.id === c.id && !this.op && this.tool === 'select' && w > 30) {
       ctx.fillStyle = '#fff';
       for (const hx of [x + fi * this.pps, x + w - fo * this.pps]) {
-        ctx.beginPath(); ctx.arc(clamp(hx, x + 5, x + w - 5), bodyY + 1, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(clamp(hx, x + 5, x + w - 5), y + 7.5, 4, 0, Math.PI * 2); ctx.fill();
       }
     }
   }
@@ -475,11 +484,11 @@ export class Timeline {
         const w = x1 - x0;
         const nearL = Math.abs(ax - x0) <= Math.min(EDGE, w / 3), nearR = Math.abs(ax - x1) <= Math.min(EDGE, w / 3);
         if (!inside && !nearL && !nearR) continue;
-        // fade tutamağı (üst bölge)
+        // fade tutamağı: yalnızca başlık şeridinde (altındaki kenar bölgesi kırpma içindir)
         const relY = p.y - row.y;
         const isAudio = row.track.kind === 'audio';
         const fi = isAudio ? c.audioFadeIn : c.fadeIn, fo = isAudio ? c.audioFadeOut : c.fadeOut;
-        if (relY >= 10 && relY <= 24 && w > 30) {
+        if (relY >= 1 && relY <= 17 && w > 30) {
           const hx1 = clamp(x0 + fi * this.pps, x0 + 5, x1 - 5), hx2 = clamp(x1 - fo * this.pps, x0 + 5, x1 - 5);
           if (Math.abs(ax - hx1) <= 6) { res.clip = c; res.fade = 'in'; return res; }
           if (Math.abs(ax - hx2) <= 6) { res.clip = c; res.fade = 'out'; return res; }
@@ -701,7 +710,7 @@ export class Timeline {
       const key = op.audio ? (op.which === 'in' ? 'audioFadeIn' : 'audioFadeOut') : (op.which === 'in' ? 'fadeIn' : 'fadeOut');
       c[key] = v;
       store.emit('change', { live: true });
-      this.tooltip(e, `${op.which === 'in' ? 'Giriş' : 'Çıkış'} geçişi: ${v.toFixed(2)} sn`);
+      this.tooltip(e, `${op.which === 'in' ? 'Açılış (fade-in)' : 'Kararma (fade-out)'}: ${v.toFixed(2)} sn`);
       return;
     }
     if (op.type === 'trim') {

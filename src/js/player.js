@@ -181,6 +181,24 @@ export class Player {
       this.syncElement(e, src, c.speed, true, fps, 0.12);
     }
 
+    // Yeni yüklenen bir video henüz kare vermediyse siyah kare yerine önceki kareyi koru
+    const waiting = layers.some((L) => {
+      if (!L.clip || L.clip.type !== 'media') return false;
+      const m = mm.get(L.clip.mediaId);
+      if (!m || m.offline || m.kind !== 'video') return false;
+      const e = this.pool.get(L.clip.id);
+      return !e || e.el.readyState < 2;
+    });
+    if (waiting) {
+      const now = performance.now();
+      if (this._holdSince == null) this._holdSince = now;
+      if (now - this._holdSince < 1500) {
+        if (!playing) setTimeout(() => this.requestRender(), 120);
+        this.onFrame?.(t, layers);
+        return;
+      }
+    }
+    this._holdSince = null;
     const W = this.canvas.width, H = this.canvas.height;
     drawFrame(this.ctx, W, H, P, t, layers, (L) => {
       const m = mm.get(L.clip.mediaId);
