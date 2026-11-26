@@ -14,6 +14,7 @@ import { transcribeDialog, exportSrt, importSrtDialog } from './subtitles.js';
 import { buildSeqTabs, openSequence, newSequence, nestSelection } from './sequences.js';
 import { createProxies, removeProxy, proxyState, setUseProxy, validateProxies } from './proxy.js';
 import { multicamDialog, switchAngle, multicamAt } from './multicam.js';
+import { addJob, queueDialog, onQueue, queueJobs, queueBusy } from './queue.js';
 import { MC } from './compositor.js';
 import { h, clamp, formatTC, formatDur, parseTC, debounce, uid, EPS } from './utils.js';
 import { icon, contextMenu, toast, modal, confirmDialog, promptDialog } from './ui.js';
@@ -1023,18 +1024,28 @@ function exportDialog() {
     h('label', { class: 'check-row' }, audioCb, h('span', {}, 'Sesi dahil et')),
     summary);
   refresh();
+  // seçilen ayarlar + hedef dosya
+  const collect = async () => {
+    const c = calc();
+    const ext = fmt.value;
+    const fname = (nameInp.value.trim() || 'video').replace(/[\\/:*?"<>|]/g, '_') + '.' + ext;
+    let filePath = null;
+    if (isElectron) {
+      filePath = await native.saveExportDialog(fname, ext);
+      if (!filePath) return null;
+    }
+    return { format: ext, width: c.w, height: c.h, fps: S.fps, bitrate: c.bitrate, rangeStart: c.a, rangeEnd: c.b, filePath, includeAudio: audioCb.checked, fname };
+  };
   modal({
-    title: 'Dışa Aktar', body, width: 520,
-    buttons: [{ label: 'Vazgeç' }, { label: 'Dışa Aktar', primary: true, action: async () => {
-      const c = calc();
-      const ext = fmt.value;
-      const fname = (nameInp.value.trim() || 'video').replace(/[\\/:*?"<>|]/g, '_') + '.' + ext;
-      let filePath = null;
-      if (isElectron) {
-        filePath = await native.saveExportDialog(fname, ext);
-        if (!filePath) return false;
-      }
-      setTimeout(() => runExport({ format: ext, width: c.w, height: c.h, fps: S.fps, bitrate: c.bitrate, rangeStart: c.a, rangeEnd: c.b, filePath, includeAudio: audioCb.checked, fname }), 50);
+    title: 'Dışa Aktar', body, width: 560,
+    buttons: [{ label: 'Vazgeç' }, { label: 'Kuyruğa ekle', action: async () => {
+      const o = await collect();
+      if (!o) return false;
+      addJob(o);
+    } }, { label: 'Dışa Aktar', primary: true, action: async () => {
+      const o = await collect();
+      if (!o) return false;
+      setTimeout(() => runExport(o), 50);
     } }],
   });
 }
@@ -1135,6 +1146,7 @@ const MENUS = {
     '-',
     { label: 'Medya içe aktar…', shortcut: 'Ctrl+I', action: importDialog },
     { label: 'Dışa aktar…', shortcut: 'Ctrl+M', action: exportDialog },
+    { label: 'Render kuyruğu…', action: queueDialog },
     { label: 'Geçerli kareyi PNG kaydet', action: () => $('#btnSnap').click() },
   ],
   edit: () => [
@@ -1313,7 +1325,13 @@ store.on('change', () => {
   hadClips = has;
 });
 // Electron: kapanırken kaydetme sorusu
-if (isElectron) native.onCloseRequest(async () => { if (await maybeSave()) native.confirmClose(); });
+if (isElectron) native.onCloseRequest(async () => {
+  if (queueBusy() || queueJobs().some((j) => j.status === 'wait')) {
+    const r = await confirmDialog('Render kuyruğu çalışıyor', 'Kuyrukta işlenen veya bekleyen dışa aktarmalar var. Kapatırsanız iptal edilir.', 'Yine de kapat', true);
+    if (r !== 'ok') return;
+  }
+  if (await maybeSave()) native.confirmClose();
+});
 else window.addEventListener('beforeunload', (e) => { if (store.dirty && store.project.clips.length) { e.preventDefault(); e.returnValue = ''; } });
 
 // dışarıdan erişim (zaman çizelgesi bağlam menüsü için)
@@ -1347,6 +1365,16 @@ for (const c of [$('#programCanvas'), $('.tl-canvas'), $('.tl-ruler'), $('#scope
 }
 
 buildSeqTabs($('#seqTabs'));
+// durum çubuğunda kuyruk göstergesi
+onQueue(() => {
+  const el = $('#statusQueue');
+  const js = queueJobs();
+  const run = js.find((j) => j.status === 'run');
+  const wait = js.filter((j) => j.status === 'wait').length;
+  el.hidden = !run && !wait;
+  el.textContent = run ? `Render: ${Math.round(run.progress * 100)}%${wait ? ` (+${wait} sırada)` : ''}` : wait ? `Render kuyruğu: ${wait} iş` : '';
+});
+$('#statusQueue').onclick = queueDialog;
 function updateProxyBtn() {
   const b = $('#btnProxy');
   const any = store.project.media.some((m) => m.proxy);

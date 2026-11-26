@@ -108,7 +108,7 @@ export async function codecSupport(format, width, height, bitrate) {
  * opts: { format, width, height, fps, bitrate, rangeStart, rangeEnd, filePath, includeAudio, onProgress, signal }
  */
 export async function exportVideo(opts) {
-  const P = JSON.parse(JSON.stringify(store.project));
+  const P = JSON.parse(JSON.stringify(opts.project || store.project));
   const { format, width, height, fps, bitrate, rangeStart: t0, rangeEnd: t1, onProgress, signal } = opts;
   const mm = new Map(P.media.map((m) => [m.id, m]));
   const totalFrames = Math.max(1, Math.round((t1 - t0) * fps));

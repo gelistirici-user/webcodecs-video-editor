@@ -430,3 +430,19 @@ kbd { font: 11px var(--mono); background: var(--bg0); border: 1px solid var(--li
 .icon-btn.txt { font: 700 10px var(--mono); letter-spacing: .5px; width: auto; padding: 0 6px; color: var(--tx3); }
 .icon-btn.txt.on { color: #ffd34d; }
 .pm-proxy { position: absolute; left: 6px; bottom: 6px; font: 700 9px var(--mono); background: rgba(0,0,0,.7); color: #ffd34d; padding: 1px 4px; border-radius: 3px; }
+
+/* render kuyruğu */
+.q-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow: auto; margin-bottom: 10px; }
+.q-item { background: var(--bg0); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.q-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.q-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-st { font-size: 12px; color: var(--tx2); white-space: nowrap; }
+.q-run .q-st { color: var(--acc2); }
+.q-done .q-st { color: var(--ok); }
+.q-err .q-st { color: var(--err); }
+.q-meta, .q-info { font-size: 12px; color: var(--tx3); }
+.q-bottom { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.q-acts { display: flex; gap: 6px; }
+.progress.sm { height: 6px; }
+.status-q { font-size: 12px; color: var(--acc2); background: none; border: none; padding: 0 8px; cursor: pointer; }
+.status-q:hover { text-decoration: underline; }
