@@ -9,6 +9,7 @@ import { decodeAudio } from './media.js';
 import { native, isElectron } from './platform.js';
 import { clamp, EPS } from './utils.js';
 import { hasKf, sampleVolume } from './keyframes.js';
+import { isRemapped, bakeClipAudio, WindowSource } from './timemap.js';
 
 export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
   const len = Math.max(1, Math.ceil((t1 - t0) * sampleRate));
@@ -32,9 +33,10 @@ export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
     }
     const buf = buffers.get(m.id);
     if (!buf) continue;
+    const remap = isRemapped(c);
     const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.playbackRate.value = c.speed;
+    src.buffer = remap ? bakeClipAudio(c, buf, m.duration) : buf;
+    src.playbackRate.value = remap ? 1 : c.speed;
     const g = ctx.createGain();
     const animVol = hasKf(c, 'volume');
     const vol = (animVol ? 1 : c.volume) * (tr.volume ?? 1);
@@ -53,8 +55,8 @@ export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
     } else src.connect(g).connect(master);
     const skip = Math.max(0, t0 - cs);
     const when = Math.max(0, cs - t0);
-    const offset = c.in + skip * c.speed;
-    const dur = (Math.min(ce, t1) - Math.max(cs, t0)) * c.speed;
+    const offset = remap ? skip : c.in + skip * c.speed;
+    const dur = (Math.min(ce, t1) - Math.max(cs, t0)) * (remap ? 1 : c.speed);
     if (dur <= 0) continue;
     src.start(when, offset, dur);
     any = true;
@@ -142,6 +144,7 @@ export async function exportVideo(opts) {
   }
   const inputs = new Map();
   const gens = new Map();
+  const revs = new Map();
   const lastFrame = new Map();
   const getTrack = async (m) => {
     if (!inputs.has(m.id)) {
@@ -154,6 +157,14 @@ export async function exportVideo(opts) {
     const m = mm.get(p.mediaId);
     const track = await getTrack(m);
     if (!track || !(await track.canDecode())) throw new Error(`"${m.name}" çözümlenemiyor (desteklenmeyen kodek).`);
+    const clip = P.clips.find((c) => c.id === clipId);
+    if (clip?.reverse) {
+      // ters klip: kaynağı küçük pencerelerde ileri çözerek geriye doğru kare ver
+      const ws = new WindowSource(m.url, { maxW: 4096, win: 0.4, keep: 2 });
+      revs.set(clipId, ws);
+      gens.set(clipId, (async function* () { for (const s of p.times) yield { canvas: await ws.get(s) }; })());
+      continue;
+    }
     const sink = new CanvasSink(track, { poolSize: 2 });
     // kaynak zamanları artan sırada olmalı; geriye gidenler için yine de çalışır (yavaş)
     gens.set(clipId, sink.canvasesAtTimestamps(p.times));
@@ -223,6 +234,7 @@ export async function exportVideo(opts) {
   }
   for (const g of gens.values()) { try { await g.return(); } catch { /* */ } }
   for (const { input } of inputs.values()) input.dispose?.();
+  for (const r of revs.values()) r.dispose();
   if (fileId) { await native.exportClose(fileId, false); return { path: opts.filePath, codecs }; }
   const mime = format === 'webm' ? 'video/webm' : 'video/mp4';
   return { blob: new Blob([target.buffer], { type: mime }), codecs };

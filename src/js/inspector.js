@@ -108,13 +108,19 @@ export class Inspector {
       get = () => valueAt(clip, path, store.playhead);
       set = (v) => {
         if (!hasKf(clip, path)) return rawSet(v);
+        if (kf.direct) {
+          // doğrudan anahtar kare (ör. hız rampası: süre değişmez); bağlı klipler de aynı eğriyi alır
+          upsertKf(clip, path, store.playhead, clamp(v, min, max));
+          (kf.partners || []).forEach((o) => { o.kf = o.kf || {}; o.kf[path] = JSON.parse(JSON.stringify(clip.kf[path])); });
+          return;
+        }
         const prev = getPath(clip, path);
         rawSet(v);
         const nv = getPath(clip, path);
         setPath(clip, path, prev);
         upsertKf(clip, path, store.playhead, nv);
       };
-      kfCtl = this.kfControls(clip, path, label);
+      kfCtl = this.kfControls(clip, path, label, kf.partners || []);
     }
     const lab = h('label', { class: 'plabel', title: def != null ? 'Sıfırlamak için çift tıklayın' : '' }, label);
     const dmin = display(min), dmax = display(max);
@@ -142,7 +148,8 @@ export class Inspector {
   }
 
   // < o > : önceki / anahtar kare ekle-kaldır / sonraki
-  kfControls(clip, path, label) {
+  kfControls(clip, path, label, partners = []) {
+    const sync = () => partners.forEach((o) => { if (clip.kf?.[path]) { o.kf = o.kf || {}; o.kf[path] = JSON.parse(JSON.stringify(clip.kf[path])); } else if (o.kf) delete o.kf[path]; });
     const inRange = () => store.playhead >= clip.start - 1e-6 && store.playhead <= clip.start + clip.duration + 1e-6;
     const prev = h('button', { class: 'kf-nav', title: 'Önceki anahtar kare', 'aria-label': `${label}: önceki anahtar kare`, html: icon('chevron', 12) });
     const dia = h('button', { class: 'kf-dia', 'aria-label': `${label}: anahtar kare` });
@@ -156,17 +163,17 @@ export class Inspector {
     };
     dia.onclick = () => {
       if (!inRange()) return toast('Oynatma kafası klibin üzerinde olmalı', 'warn');
-      if (kfAt(clip, path, store.playhead)) this.once('Anahtar kare kaldır', () => removeKf(clip, path, store.playhead));
-      else this.once('Anahtar kare ekle', () => upsertKf(clip, path, store.playhead, valueAt(clip, path, store.playhead)));
+      if (kfAt(clip, path, store.playhead)) this.once('Anahtar kare kaldır', () => { removeKf(clip, path, store.playhead); sync(); });
+      else this.once('Anahtar kare ekle', () => { upsertKf(clip, path, store.playhead, valueAt(clip, path, store.playhead)); sync(); });
       upd();
     };
     dia.oncontextmenu = (e) => {
       e.preventDefault();
       const k = kfAt(clip, path, store.playhead);
       contextMenu(e.clientX, e.clientY, [
-        ...Object.entries(EASINGS).map(([ek, el]) => ({ label: (k?.e === ek ? '✓ ' : '') + 'Geçiş: ' + el, disabled: !k, action: () => this.once('Anahtar kare yumuşatma', () => { kfAt(clip, path, store.playhead).e = ek; }) })),
+        ...Object.entries(EASINGS).map(([ek, el]) => ({ label: (k?.e === ek ? '✓ ' : '') + 'Geçiş: ' + el, disabled: !k, action: () => this.once('Anahtar kare yumuşatma', () => { kfAt(clip, path, store.playhead).e = ek; sync(); }) })),
         '-',
-        { label: 'Animasyonu kaldır', disabled: !hasKf(clip, path), action: () => { this.once('Animasyonu kaldır', () => clearKf(clip, path, store.playhead)); upd(); } },
+        { label: 'Animasyonu kaldır', disabled: !hasKf(clip, path), action: () => { this.once('Animasyonu kaldır', () => { clearKf(clip, path, store.playhead); partners.forEach((o) => clearKf(o, path, store.playhead)); }); upd(); } },
       ]);
     };
     prev.onclick = () => { const t = neighborKf(clip, path, store.playhead, -1); if (t != null) store.setPlayhead(t); };
@@ -228,7 +235,9 @@ export class Inspector {
           group.forEach((c) => { const max = store.mediaMaxDur(c); c.duration = Math.min(v, max); });
         }),
       ));
+      const isMedia = main.type === 'media';
       this.numRow(b, 'Hız', {
+        kf: isMedia ? { clip: main, path: 'speed', direct: true, partners: group.filter((c) => c !== main) } : undefined,
         get: () => main.speed, set: (v) => group.forEach((c) => {
           const srcLen = c.duration * c.speed;
           c.speed = v;
@@ -236,6 +245,13 @@ export class Inspector {
         }),
         min: 0.1, max: 8, step: 0.01, decimals: 2, suffix: '×', def: 1, history: 'Hız',
       });
+      if (isMedia) {
+        this.toggleRow(b, 'Ters oynat', () => !!main.reverse, (v) => group.forEach((c) => { c.reverse = v; }));
+        const hint = h('p', { class: 'hint' });
+        const upd = () => { hint.textContent = hasKf(main, 'speed') ? 'Hız rampası etkin: hız anahtar kareler arasında değişir. Klip süresi sabit kalır.' : 'Hız rampası için ◆ ile hız anahtar kareleri ekleyin.'; };
+        upd(); this.refreshers.push(upd);
+        b.append(hint);
+      }
     });
   }
 

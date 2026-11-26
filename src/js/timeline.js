@@ -4,7 +4,8 @@ import { thumbAt } from './media.js';
 import { clamp, formatTC, EPS, uid, h } from './utils.js';
 import { icon, contextMenu, toast, promptDialog } from './ui.js';
 import { TRANSITIONS, COLOR_PRESETS, ANIMATIONS } from './compositor.js';
-import { kfTimes } from './keyframes.js';
+import { kfTimes, hasKf } from './keyframes.js';
+import { srcTimeAt } from './timemap.js';
 
 export const drag = { payload: null }; // panelden sürüklenen öğe
 const RULER_H = 30;
@@ -328,7 +329,7 @@ export class Timeline {
         const firstI = Math.floor((startX - x) / tw);
         for (let i = firstI; x + i * tw < Math.min(x + w, W); i++) {
           const tx = x + i * tw;
-          const mt = c.in + ((i * tw + tw / 2) / this.pps) * c.speed;
+          const mt = srcTimeAt(c, c.start + (i * tw + tw / 2) / this.pps);
           const img = kind === 'image' ? sample : thumbAt(c.mediaId, mt);
           if (img) ctx.drawImage(img, tx, bodyY, tw, th);
         }
@@ -343,8 +344,9 @@ export class Timeline {
         ctx.fillStyle = 'rgba(200,255,225,0.75)';
         const xs = Math.max(x, 0), xe = Math.min(x + w, W);
         for (let px = Math.floor(xs); px < xe; px += 1) {
-          const tt = c.in + ((px - x) / this.pps) * c.speed;
-          const tt2 = c.in + ((px + 1 - x) / this.pps) * c.speed;
+          let tt = srcTimeAt(c, c.start + (px - x) / this.pps);
+          let tt2 = srcTimeAt(c, c.start + (px + 1 - x) / this.pps);
+          if (tt2 < tt) [tt, tt2] = [tt2, tt];
           let mx = 0;
           for (let k = Math.floor(tt * peaksRate); k <= Math.floor(tt2 * peaksRate); k++) if (peaks[k] > mx) mx = peaks[k];
           const a = Math.min(1, mx * c.volume) * (bodyH / 2 - 2);
@@ -396,7 +398,9 @@ export class Timeline {
     ctx.font = '600 11px "Segoe UI", sans-serif';
     let label = c.type === 'text' ? 'Metin' : c.type === 'color' ? 'Renk' : (m?.name || 'Medya');
     const badges = [];
-    if (c.speed !== 1) badges.push(`${Math.round(c.speed * 100)}%`);
+    if (c.reverse) badges.push('◀');
+    if (hasKf(c, 'speed')) badges.push('rampa');
+    else if (c.speed !== 1) badges.push(`${Math.round(c.speed * 100)}%`);
     if (!isAudio && (c.color.preset !== 'none' || c.color.brightness || c.color.contrast || c.color.saturation || c.color.temperature)) badges.push('fx');
     if (c.linkId) badges.push('🔗');
     if (badges.length) label = badges.join(' ') + '  ' + label;
@@ -883,6 +887,7 @@ export class Timeline {
         clip.linkId ? { label: 'Video ve sesin bağlantısını kopar', action: () => store.transact('Bağlantıyı kopar', () => store.selectedClips().forEach((c) => (c.linkId = null))) }
           : (store.selection.size === 2 ? { label: 'Seçili klipleri bağla', action: () => { const l = uid('l'); store.transact('Bağla', () => store.selectedClips().forEach((c) => (c.linkId = l))); } } : null),
         { label: 'Hız / Süre…', shortcut: 'Ctrl+R', action: () => A.speedDialog() },
+        clip.type === 'media' ? { label: clip.reverse ? 'Ters oynatmayı kapat' : 'Ters oynat', action: () => store.transact('Ters oynat', () => { const v = !clip.reverse; store.linked(clip).forEach((c) => { c.reverse = v; }); }) } : null,
         isVideoTrack && clip.type === 'media' ? { label: 'Kareyi çerçeveye sığdır', action: () => store.transact('Sığdır', () => { clip.transform.fit = 'cover'; }) } : null,
         isVideoTrack ? { label: clip.transitionIn ? 'Geçişi kaldır' : 'Çapraz geçiş ekle', action: () => store.transact('Geçiş', () => { clip.transitionIn = clip.transitionIn ? null : { type: 'dissolve', duration: 1 }; }) } : null,
         { label: clip.muted ? 'Klibi etkinleştir' : 'Klibi devre dışı bırak', shortcut: 'Shift+E', action: () => A.toggleClipEnabled() },

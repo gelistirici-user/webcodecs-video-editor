@@ -1,6 +1,7 @@
 // Kare birleştirici: hem önizleme hem dışa aktarma aynı kodu kullanır (ne görüyorsan o çıkar)
 import { clamp, smooth, EPS } from './utils.js';
 import { animated, valueAt } from './keyframes.js';
+import { srcTimeAt } from './timemap.js';
 
 export const TRANSITIONS = {
   dissolve: 'Çapraz Geçiş',
@@ -46,11 +47,7 @@ export const BLENDS = {
   'hard-light': 'Sert Işık', lighten: 'Aydınlat', darken: 'Koyulaştır', difference: 'Fark', color: 'Renk', luminosity: 'Parlaklık',
 };
 
-function mediaTime(clip, t, media) {
-  let s = clip.in + (t - clip.start) * clip.speed;
-  if (media && media.kind !== 'image' && media.duration) s = clamp(s, 0, Math.max(0, media.duration - 0.001));
-  return Math.max(0, s);
-}
+const mediaTime = (clip, t, media) => srcTimeAt(clip, t, media);
 
 // t anında görünen katmanlar (alttan üste)
 export function layersAt(project, t, mediaById) {

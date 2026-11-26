@@ -2,6 +2,7 @@
 import { store } from './store.js';
 import { layersAt, drawFrame, audioGain } from './compositor.js';
 import { clamp, EPS } from './utils.js';
+import { isRemapped, speedAt, srcTimeAt, srcSpan, bakeClipAudio, decodeSegment, WindowSource } from './timemap.js';
 
 const LOOKAHEAD = 1.5;
 
@@ -90,6 +91,8 @@ export class Player {
     const e = this.pool.get(id);
     if (!e) return;
     try { e.el.pause(); e.el.removeAttribute('src'); e.el.load(); } catch { /* */ }
+    this.stopBaked(e);
+    e.rev?.dispose();
     this.pool.delete(id);
   }
 
@@ -125,10 +128,44 @@ export class Player {
       // yaklaşan klipleri giriş karesinde beklet
       const active = t >= c.start - EPS && t < c.start + c.duration;
       const inLayer = layers.some((L) => L.clip && L.clip.id === c.id);
-      if (!active && !inLayer && e.el.paused && Math.abs(e.el.currentTime - c.in) > 0.05 && e.el.readyState >= 1) e.el.currentTime = c.in;
+      const s0 = srcTimeAt(c, c.start, m);
+      if (!active && !inLayer && e.el.paused && Math.abs(e.el.currentTime - s0) > 0.05 && e.el.readyState >= 1) e.el.currentTime = s0;
     }
     for (const id of [...this.pool.keys()]) if (!keep.has(id)) this.release(id);
     return keep;
+  }
+
+  // ---------- hız eşlemeli ses (rampa/ters) ----------
+  // klibin kaynak aralığını çöz (rampa/ters ses için)
+  mediaAudio(m, c) {
+    const a = c.in - 0.1, b = c.in + srcSpan(c) + 0.1;
+    return decodeSegment(m.url, a, b).catch(() => null);
+  }
+  playBaked(e, c, m, local) {
+    if (!this.audioCtx || !e.gain) return;
+    const key = `${c.start}|${c.in}|${c.duration}|${c.speed}|${c.reverse}|${JSON.stringify(c.kf?.speed || null)}`;
+    if (e.bakeKey !== key) {
+      this.stopBaked(e);
+      e.bakeKey = key; e.baked = null;
+      this.mediaAudio(m, c).then((buf) => { if (buf && e.bakeKey === key) e.baked = bakeClipAudio(c, buf, m.duration); });
+      return;
+    }
+    if (!e.baked) return;
+    const now = this.audioCtx.currentTime;
+    if (e.node) {
+      const expected = e.nodeLocal + (now - e.nodeAt);
+      if (Math.abs(expected - local) < 0.15) return;
+      this.stopBaked(e, true);
+    }
+    const n = this.audioCtx.createBufferSource();
+    n.buffer = e.baked;
+    n.connect(e.gain);
+    n.start(0, clamp(local, 0, e.baked.duration));
+    e.node = n; e.nodeAt = now; e.nodeLocal = local;
+  }
+  stopBaked(e, keepKey = false) {
+    if (e.node) { try { e.node.stop(); e.node.disconnect(); } catch { /* */ } e.node = null; }
+    if (!keepKey && !e.bakeKey) e.baked = null;
   }
 
   requestRender() {
@@ -160,7 +197,12 @@ export class Player {
       const e = this.pool.get(L.clip.id);
       if (!e) continue;
       activeVideo.add(L.clip.id);
-      this.syncElement(e, L.srcTime, L.clip.speed, playing, fps);
+      if (L.clip.reverse && playing) {
+        // ters oynatma: video öğesi geriye oynayamaz; kareler pencereli çözücüden gelir
+        if (!e.el.paused) e.el.pause();
+        if (!e.rev) { e.rev = new WindowSource(m.url, { maxW: 640, win: 1, keep: 3 }); }
+        e.rev.prefetch(L.srcTime);
+      } else this.syncElement(e, L.srcTime, speedAt(L.clip, t), playing, fps);
     }
     // ses klipleri
     const tracks = store.audioTracks();
@@ -171,14 +213,21 @@ export class Player {
       if (e.kind === 'video') { if (!activeVideo.has(c.id) && !e.el.paused) e.el.pause(); continue; }
       const tr = store.track(c.trackId);
       const active = t >= c.start - EPS && t < c.start + c.duration - EPS;
-      if (!active || !playing) { if (!e.el.paused) e.el.pause(); continue; }
+      const remap = isRemapped(c);
+      if (!active || !playing) { if (!e.el.paused) e.el.pause(); this.stopBaked(e); continue; }
       const m = mm.get(c.mediaId);
-      const src = clamp(c.in + (t - c.start) * c.speed, 0, m.duration);
       let g = audioGain(c, t) * (tr.volume ?? 1) * (P.master ?? 1);
       if (tr.muted || (solo && !tr.solo)) g = 0;
       if (e.gain) e.gain.gain.setTargetAtTime(g, this.audioCtx.currentTime, 0.015);
       else e.el.volume = clamp(g, 0, 1);
-      this.syncElement(e, src, c.speed, true, fps, 0.12);
+      if (remap) {
+        // hız rampası / ters: önceden hesaplanmış ses tamponu çalınır
+        if (!e.el.paused) e.el.pause();
+        this.playBaked(e, c, m, t - c.start);
+      } else {
+        this.stopBaked(e);
+        this.syncElement(e, srcTimeAt(c, t, m), c.speed, true, fps, 0.12);
+      }
     }
 
     // Yeni yüklenen bir video henüz kare vermediyse siyah kare yerine önceki kareyi koru
@@ -187,6 +236,7 @@ export class Player {
       const m = mm.get(L.clip.mediaId);
       if (!m || m.offline || m.kind !== 'video') return false;
       const e = this.pool.get(L.clip.id);
+      if (e && e.rev && playing && L.clip.reverse) return !e.rev.frameAt(L.srcTime) && e.el.readyState < 2;
       return !e || e.el.readyState < 2;
     });
     if (waiting) {
@@ -205,6 +255,10 @@ export class Player {
       if (!m || m.offline) return { offline: true };
       if (m.kind === 'image') { const img = this.image(m); return img.complete && img.naturalWidth ? { el: img, w: img.naturalWidth, h: img.naturalHeight } : null; }
       const e = this.pool.get(L.clip.id);
+      if (e && e.rev && playing && L.clip.reverse) {
+        const fc = e.rev.frameAt(L.srcTime);
+        if (fc) return { el: fc, w: fc.width, h: fc.height };
+      }
       if (!e || e.el.readyState < 2) return null;
       return { el: e.el, w: e.el.videoWidth, h: e.el.videoHeight };
     });
@@ -278,7 +332,7 @@ export class Player {
     this.playing = false;
     this.rate = 1;
     cancelAnimationFrame(this._raf);
-    for (const e of this.pool.values()) e.el.pause();
+    for (const e of this.pool.values()) { e.el.pause(); this.stopBaked(e, true); }
     store.setPlayhead(store.playhead);
     store.emit('transport', false);
     this.requestRender();
