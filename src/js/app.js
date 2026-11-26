@@ -12,6 +12,7 @@ import { animated, writeValue } from './keyframes.js';
 import { normalizeSelected, duckDialog, silenceDialog } from './tools.js';
 import { transcribeDialog, exportSrt, importSrtDialog } from './subtitles.js';
 import { buildSeqTabs, openSequence, newSequence, nestSelection } from './sequences.js';
+import { createProxies, removeProxy, proxyState, setUseProxy, validateProxies } from './proxy.js';
 import { h, clamp, formatTC, formatDur, parseTC, debounce, uid, EPS } from './utils.js';
 import { icon, contextMenu, toast, modal, confirmDialog, promptDialog } from './ui.js';
 
@@ -344,6 +345,7 @@ function renderMediaList() {
     else thumb.innerHTML = icon(m.kind === 'audio' ? 'music' : m.kind === 'image' ? 'image' : 'film', 28);
     if (m.kind !== 'image') thumb.append(h('span', { class: 'pm-dur' }, formatDur(m.duration)));
     if (m.offline) thumb.append(h('span', { class: 'pm-offline' }, 'Çevrimdışı'));
+    if (m.proxy) thumb.append(h('span', { class: 'pm-proxy', title: 'Proxy hazır' }, 'PRX'));
     if (used.has(m.id)) thumb.append(h('span', { class: 'pm-used', title: 'Zaman çizelgesinde kullanılıyor' }));
     const meta = m.kind === 'audio' ? 'Ses' : m.kind === 'image' ? `Görsel · ${m.width}×${m.height}` : `${m.width}×${m.height}${m.fps ? ' · ' + m.fps + ' fps' : ''}`;
     const card = h('div', { class: 'pm-item' + (m.offline ? ' offline' : ''), draggable: !m.offline, tabindex: 0, title: `${m.name}\n${meta}\nÇift tık: kaynak monitör · Sürükle: zaman çizelgesi`, 'data-id': m.id },
@@ -368,6 +370,7 @@ function renderMediaList() {
         { label: 'Oynatma kafasına üzerine yaz', shortcut: '.', disabled: m.offline, action: () => placeAtPlayhead(m, 'overwrite') },
         { label: 'Sona ekle', disabled: m.offline, action: () => placeAtEnd(m) },
         '-',
+        m.kind === 'video' ? (m.proxy ? { label: 'Proxy\'yi kaldır', action: () => removeProxy(m) } : { label: 'Proxy oluştur (hafif önizleme kopyası)', disabled: m.offline, action: () => createProxies([m]) }) : null,
         { label: 'Yeniden adlandır', action: async () => { const n = await promptDialog('Yeniden adlandır', 'Ad', m.name); if (n) store.transact('Medya adı', () => { store.media(m.id).name = n; }); } },
         { label: 'Medyayı yeniden bağla…', action: () => relink(m) },
         isElectron && m.path ? { label: 'Dosya konumunu göster', action: () => native.showItem(m.path) } : null,
@@ -1157,6 +1160,9 @@ const MENUS = {
     { label: 'Normalleştir: ses yüksekliği -14 LUFS', disabled: !store.selection.size, action: () => normalizeSelected('lufs') },
     { label: 'Otomatik ducking (müziği kıs)…', action: duckDialog },
     '-',
+    { label: 'Tüm videolar için proxy oluştur', action: () => createProxies(store.project.media.filter((m) => m.kind === 'video' && !m.proxy)) },
+    { label: (proxyState.use ? '✓ ' : '') + 'Önizlemede proxy kullan', action: () => { setUseProxy(!proxyState.use); updateProxyBtn(); } },
+    '-',
     { label: 'Sessizlikleri kes…', disabled: !store.selection.size, action: silenceDialog },
     '-',
     { label: 'Otomatik altyazı (Whisper)…', action: transcribeDialog },
@@ -1325,6 +1331,17 @@ for (const c of [$('#programCanvas'), $('.tl-canvas'), $('.tl-ruler'), $('#scope
 }
 
 buildSeqTabs($('#seqTabs'));
+function updateProxyBtn() {
+  const b = $('#btnProxy');
+  const any = store.project.media.some((m) => m.proxy);
+  b.classList.toggle('on', proxyState.use && any);
+  b.setAttribute('aria-pressed', String(proxyState.use));
+  b.title = any ? (proxyState.use ? 'Proxy kullanılıyor (tıkla: orijinale geç)' : 'Orijinal medya (tıkla: proxy kullan)') : 'Proxy yok — Medya panelinde bir videoya sağ tıklayıp "Proxy oluştur" deyin';
+}
+$('#btnProxy').onclick = () => { setUseProxy(!proxyState.use); updateProxyBtn(); };
+store.on('change', (d) => { if (!d?.live) updateProxyBtn(); });
+store.on('load', async () => { await validateProxies(); updateProxyBtn(); });
+updateProxyBtn();
 store.on('open-sequence', (id) => openSequence(id));
 
 // ---------- başlat ----------

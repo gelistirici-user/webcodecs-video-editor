@@ -1,5 +1,5 @@
 // Medya içe aktarma, inceleme, küçük resim ve dalga formu üretimi
-import { Input, UrlSource, ALL_FORMATS, CanvasSink } from '../vendor/mediabunny.mjs';
+import { Input, UrlSource, ALL_FORMATS, CanvasSink, AudioBufferSink } from '../vendor/mediabunny.mjs';
 import { store } from './store.js';
 import { uid } from './utils.js';
 
@@ -120,6 +120,7 @@ async function makeThumbs(m, cache) {
     const sink = new CanvasSink(track, { width: w, height: THUMB_H, fit: 'cover' });
     let i = 0;
     for await (const wc of sink.canvasesAtTimestamps(times)) {
+      await idle();
       if (wc) {
         const c = document.createElement('canvas');
         c.width = w; c.height = THUMB_H;
@@ -157,21 +158,53 @@ export async function decodeAudio(url) {
   return decodeCtx.decodeAudioData(buf);
 }
 
+// Oynatma sırasında arka plan işleri bekler (disk/çözücü yarışı oynatmayı takmasın)
+let playingNow = false;
+store.on('transport', (p) => { playingNow = !!p; });
+const idle = async () => { while (playingNow) await new Promise((r) => setTimeout(r, 250)); };
+
 async function makePeaks(m, cache) {
-  const ab = await decodeAudio(m.url);
   const rate = 100; // saniyede 100 tepe
-  const n = Math.ceil(ab.duration * rate);
-  const peaks = new Float32Array(n);
-  const chans = [];
-  for (let c = 0; c < ab.numberOfChannels; c++) chans.push(ab.getChannelData(c));
-  const step = ab.sampleRate / rate;
-  for (let i = 0; i < n; i++) {
-    let mx = 0;
-    const s0 = Math.floor(i * step), s1 = Math.min(ab.length, Math.floor((i + 1) * step));
-    for (const ch of chans) for (let s = s0; s < s1; s += 4) { const v = Math.abs(ch[s]); if (v > mx) mx = v; }
-    peaks[i] = mx;
-  }
-  cache.peaks = peaks;
+  // akışlı çözme: dosyanın tamamını belleğe almadan parça parça (bellek ve disk yükü düşük)
+  const input = new Input({ source: new UrlSource(m.url), formats: ALL_FORMATS });
+  try {
+    const tr = await input.getPrimaryAudioTrack();
+    if (!tr || !(await tr.canDecode())) throw new Error('decode');
+    const dur = m.duration || (await input.computeDuration());
+    const peaks = new Float32Array(Math.ceil(dur * rate) + 1);
+    const sink = new AudioBufferSink(tr);
+    let k = 0;
+    for await (const { buffer, timestamp } of sink.buffers()) {
+      if (++k % 50 === 0) await idle();
+      const sr = buffer.sampleRate, step = sr / rate;
+      const chans = [];
+      for (let c = 0; c < buffer.numberOfChannels; c++) chans.push(buffer.getChannelData(c));
+      for (let s = 0; s < buffer.length; s += 4) {
+        const i = Math.floor((timestamp + s / sr) * rate);
+        if (i < 0 || i >= peaks.length) continue;
+        let mx = peaks[i];
+        for (const ch of chans) { const v = Math.abs(ch[s]); if (v > mx) mx = v; }
+        peaks[i] = mx;
+      }
+      void step;
+    }
+    cache.peaks = peaks;
+  } catch {
+    // yedek: tarayıcının çözücüsü (tüm dosya)
+    const ab = await decodeAudio(m.url);
+    const n = Math.ceil(ab.duration * rate);
+    const peaks = new Float32Array(n);
+    const chans = [];
+    for (let c = 0; c < ab.numberOfChannels; c++) chans.push(ab.getChannelData(c));
+    const step = ab.sampleRate / rate;
+    for (let i = 0; i < n; i++) {
+      let mx = 0;
+      const s0 = Math.floor(i * step), s1 = Math.min(ab.length, Math.floor((i + 1) * step));
+      for (const ch of chans) for (let q = s0; q < s1; q += 4) { const v = Math.abs(ch[q]); if (v > mx) mx = v; }
+      peaks[i] = mx;
+    }
+    cache.peaks = peaks;
+  } finally { input.dispose?.(); }
   cache.peaksRate = rate;
   if (!m.hasAudio) m.hasAudio = true;
   store.emit('media-cache', m.id);

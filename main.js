@@ -46,8 +46,9 @@ function serveMedia(request) {
     let start = m && m[1] ? parseInt(m[1], 10) : 0;
     let end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
     if (m && !m[1] && m[2]) { start = Math.max(0, stat.size - parseInt(m[2], 10)); end = stat.size - 1; }
-    // açık uçlu istekleri parçalara böl: oynatıcı konum değiştirince dev akışlar birikmesin
-    if (m && m[1] && !m[2]) end = Math.min(end, start + CHUNK - 1);
+    // konumlama isteklerini (başlangıç > 0, açık uçlu) parçala: oynatıcı konum değiştirince dev akışlar birikmesin.
+    // İlk istek (0'dan) tam yanıtlanır; aksi halde moov kutusu sonda olan MP4'leri Chromium açamıyor.
+    if (m && m[1] && !m[2] && start > 0) end = Math.min(end, start + CHUNK - 1);
     end = Math.min(end, stat.size - 1);
     if (start > end || start >= stat.size) {
       return new Response(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${stat.size}` } });
@@ -68,7 +69,7 @@ function createWindow() {
     width: 1600, height: 950, minWidth: 1100, minHeight: 680,
     backgroundColor: '#15171c', title: 'Kurgu Studio', show: false,
     icon: path.join(__dirname, 'build', 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, backgroundThrottling: false },
   });
   Menu.setApplicationMenu(null);
   win.loadURL('app://kurgu/index.html');
@@ -139,6 +140,7 @@ ipcMain.handle('app:confirmClose', () => { allowClose = true; win.close(); });
 
 // Dışa aktarma: dosyaya konumlu yazım (mediabunny StreamTarget)
 ipcMain.handle('export:open', async (_e, p) => {
+  await fsp.mkdir(path.dirname(p), { recursive: true });
   const fh = await fsp.open(p, 'w');
   const id = String(Date.now()) + Math.random().toString(16).slice(2);
   exportHandles.set(id, fh);

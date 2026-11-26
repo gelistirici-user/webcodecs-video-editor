@@ -3,6 +3,7 @@ import { store } from './store.js';
 import { layersAt, drawFrame, audioGain, collectInstances } from './compositor.js';
 import { clamp, EPS } from './utils.js';
 import { buildChain, ensureWorklet, afxActive } from './audiofx.js';
+import { previewUrl } from './proxy.js';
 import { isRemapped, speedAt, srcTimeAt, srcSpan, bakeClipAudio, decodeSegment, WindowSource } from './timemap.js';
 
 const LOOKAHEAD = 1.5;
@@ -26,6 +27,7 @@ export class Player {
     store.on('change', () => this.requestRender());
     store.on('playhead', () => { if (!this.playing) this.requestRender(); });
     store.on('media-cache', () => this.requestRender());
+    store.on('proxy', () => { for (const k of [...this.pool.keys()]) this.release(k); this.requestRender(); });
   }
 
   ensureAudio() {
@@ -91,19 +93,21 @@ export class Player {
 
   getEntry(key, kind, media) {
     let e = this.pool.get(key);
-    if (e && e.url === media.url && e.kind === kind) return e;
+    const url = previewUrl(media);
+    if (e && e.url === url && e.kind === kind) return e;
     if (e) this.release(key);
-    if (media.offline || !media.url) return null;
+    if (media.offline || !url) return null;
     const el = document.createElement(kind === 'audio' ? 'audio' : 'video');
     el.crossOrigin = 'anonymous';
     el.preload = 'auto';
     el.playsInline = true;
     el.preservesPitch = false;
     if (kind === 'video') el.muted = true;
-    el.src = media.url;
+    // her öğeye ayrı adres (aynı sunucu adındaki eşzamanlı istek sınırına takılmasın; ana süreç adı yok sayar)
+    el.src = url.startsWith('media://file/') ? url.replace('media://file/', `media://p${(this._elN = (this._elN || 0) + 1)}/`) : url;
     el.addEventListener('seeked', () => { if (!this.playing) this.requestRender(); });
     el.addEventListener('loadeddata', () => { if (!this.playing) this.requestRender(); });
-    e = { el, kind, mediaId: media.id, url: media.url, gain: null };
+    e = { el, kind, mediaId: media.id, url, gain: null };
     this.pool.set(key, e);
     if (kind === 'audio') this.connectAudio(e);
     return e;
