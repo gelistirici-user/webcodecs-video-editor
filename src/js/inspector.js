@@ -4,6 +4,8 @@ import { h, formatTC, parseTC, clamp } from './utils.js';
 import { icon, scrubNumber, toast, contextMenu } from './ui.js';
 import { valueAt, hasKf, kfAt, upsertKf, removeKf, clearKf, neighborKf, getPath, setPath, anyKf, EASINGS } from './keyframes.js';
 import { TRANSITIONS, COLOR_PRESETS, ANIMATIONS, BLENDS } from './compositor.js';
+import { DEFAULT_AFX } from './audiofx.js';
+import { normalizeSelected } from './tools.js';
 
 const FONTS = ['Segoe UI', 'Arial', 'Arial Black', 'Bahnschrift', 'Calibri', 'Cambria', 'Candara', 'Comic Sans MS', 'Consolas', 'Constantia', 'Corbel', 'Courier New', 'Georgia', 'Impact', 'Lucida Console', 'Palatino Linotype', 'Segoe Print', 'Segoe Script', 'Tahoma', 'Times New Roman', 'Trebuchet MS', 'Verdana'];
 
@@ -390,6 +392,17 @@ export class Inspector {
       this.numRow(b, 'Giriş (fade)', { get: () => c.audioFadeIn, set: (v) => (c.audioFadeIn = clamp(v, 0, c.duration)), min: 0, max: Math.min(10, c.duration), step: 0.01, decimals: 2, suffix: ' sn', def: 0 });
       this.numRow(b, 'Çıkış (fade)', { get: () => c.audioFadeOut, set: (v) => (c.audioFadeOut = clamp(v, 0, c.duration)), min: 0, max: Math.min(10, c.duration), step: 0.01, decimals: 2, suffix: ' sn', def: 0 });
       this.toggleRow(b, 'Sessiz', () => c.muted, (v) => (c.muted = v));
+      if (c.type === 'media') {
+        const fx = () => c.afx || (c.afx = DEFAULT_AFX());
+        b.append(h('div', { class: 'sub-head' }, 'İyileştirme'));
+        this.numRow(b, 'Gürültü azalt.', { get: () => c.afx?.denoise || 0, set: (v) => { fx().denoise = clamp(v, 0, 1); }, min: 0, max: 1, step: 1, suffix: '%', def: 0, display: (v) => v * 100, parse: (v) => v / 100, history: 'Gürültü azaltma' });
+        this.toggleRow(b, 'Alçak kesim (80 Hz)', () => !!c.afx?.lowcut, (v) => { fx().lowcut = v; });
+        this.toggleRow(b, 'Konuşmayı netleştir', () => !!c.afx?.voice, (v) => { fx().voice = v; });
+        const nb = h('div', { class: 'btn-row' },
+          h('button', { class: 'btn sm', title: 'En yüksek tepe -1 dBFS olacak şekilde ayarla', onclick: () => normalizeSelected('peak') }, 'Normalleştir (tepe)'),
+          h('button', { class: 'btn sm', title: 'Ortalama ses yüksekliğini yaklaşık -14 LUFS yap (YouTube/sosyal medya)', onclick: () => normalizeSelected('lufs') }, '-14 LUFS'));
+        b.append(nb);
+      }
       if (c.speed !== 1) b.append(h('p', { class: 'hint' }, 'Not: Hız değişimi ses perdesini de değiştirir.'));
     });
   }

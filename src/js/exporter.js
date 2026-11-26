@@ -10,6 +10,7 @@ import { native, isElectron } from './platform.js';
 import { clamp, EPS } from './utils.js';
 import { hasKf, sampleVolume } from './keyframes.js';
 import { isRemapped, bakeClipAudio, WindowSource } from './timemap.js';
+import { buildChain, ensureWorklet, afxActive } from './audiofx.js';
 
 export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
   const len = Math.max(1, Math.ceil((t1 - t0) * sampleRate));
@@ -21,6 +22,7 @@ export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
   const solo = tracks.some((t) => t.solo);
   const buffers = new Map();
   let any = false;
+  const workletOk = project.clips.some((c) => c.afx?.denoise > 0) ? await ensureWorklet(ctx) : false;
   for (const c of project.clips) {
     const tr = tracks.find((t) => t.id === c.trackId);
     if (!tr || tr.muted || (solo && !tr.solo) || c.muted || c.type !== 'media') continue;
@@ -53,6 +55,13 @@ export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
       for (const [tt, v] of pts.slice(1)) kg.gain.linearRampToValueAtTime(v, at(tt));
       src.connect(g).connect(kg).connect(master);
     } else src.connect(g).connect(master);
+    if (afxActive(c.afx)) {
+      // ses efektleri kaynakla kazanç arasına girer
+      src.disconnect();
+      const ch = buildChain(ctx, c.afx, workletOk);
+      src.connect(ch.input);
+      ch.output.connect(g);
+    }
     const skip = Math.max(0, t0 - cs);
     const when = Math.max(0, cs - t0);
     const offset = remap ? skip : c.in + skip * c.speed;

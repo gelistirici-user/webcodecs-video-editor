@@ -390,3 +390,9 @@ kbd { font: 11px var(--mono); background: var(--bg0); border: 1px solid var(--li
   .proj-info { display: none; }
   .tl-hint { display: none; }
 }
+
+/* araçlar */
+.btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+.chk-list { display: flex; flex-direction: column; gap: 2px; background: var(--bg0); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; max-height: 140px; overflow: auto; }
+.range-row { display: flex; align-items: center; gap: 8px; }
+.range-row .slider { flex: 1; }

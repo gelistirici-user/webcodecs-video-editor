@@ -2,6 +2,7 @@
 import { store } from './store.js';
 import { layersAt, drawFrame, audioGain } from './compositor.js';
 import { clamp, EPS } from './utils.js';
+import { buildChain, ensureWorklet, afxActive } from './audiofx.js';
 import { isRemapped, speedAt, srcTimeAt, srcSpan, bakeClipAudio, decodeSegment, WindowSource } from './timemap.js';
 
 const LOOKAHEAD = 1.5;
@@ -46,10 +47,33 @@ export class Player {
   connectAudio(entry) {
     if (!this.audioCtx || entry.gain) return;
     try {
-      const src = this.audioCtx.createMediaElementSource(entry.el);
+      entry.src = this.audioCtx.createMediaElementSource(entry.el);
       entry.gain = this.audioCtx.createGain();
-      src.connect(entry.gain).connect(this.master);
+      entry.fxIn = this.audioCtx.createGain();
+      entry.src.connect(entry.fxIn);
+      entry.fxIn.connect(entry.gain).connect(this.master);
+      entry.afxKey = '';
     } catch { /* bağlanamadı: öğe sesi doğrudan çalar */ }
+  }
+
+  // klip ses efektleri değiştiyse zinciri yeniden kur: fxIn -> [zincir] -> gain
+  applyAfx(entry, afx) {
+    if (!entry.fxIn) return;
+    const key = afxActive(afx) ? JSON.stringify(afx) : '';
+    if (entry.afxKey === key) return;
+    entry.afxKey = key;
+    const ac = this.audioCtx;
+    const rebuild = (ok) => {
+      if (entry.afxKey !== key) return;
+      try { entry.fxIn.disconnect(); } catch { /* */ }
+      if (entry.chain) { try { entry.chain.output.disconnect(); } catch { /* */ } }
+      entry.chain = null;
+      if (!key) { entry.fxIn.connect(entry.gain); return; }
+      entry.chain = buildChain(ac, afx, ok);
+      entry.fxIn.connect(entry.chain.input);
+      entry.chain.output.connect(entry.gain);
+    };
+    if (afx?.denoise > 0) ensureWorklet(ac).then(rebuild); else rebuild(false);
   }
 
   levels() {
@@ -159,7 +183,7 @@ export class Player {
     }
     const n = this.audioCtx.createBufferSource();
     n.buffer = e.baked;
-    n.connect(e.gain);
+    n.connect(e.fxIn || e.gain);
     n.start(0, clamp(local, 0, e.baked.duration));
     e.node = n; e.nodeAt = now; e.nodeLocal = local;
   }
@@ -214,12 +238,18 @@ export class Player {
       const tr = store.track(c.trackId);
       const active = t >= c.start - EPS && t < c.start + c.duration - EPS;
       const remap = isRemapped(c);
+      if (active && this._prerolling && !remap) {
+        // ön hazırlık: ses öğesini başlangıç konumuna getir (duraklatılmış)
+        this.syncElement(e, srcTimeAt(c, t, mm.get(c.mediaId)), c.speed, false, fps);
+        continue;
+      }
       if (!active || !playing) { if (!e.el.paused) e.el.pause(); this.stopBaked(e); continue; }
       const m = mm.get(c.mediaId);
       let g = audioGain(c, t) * (tr.volume ?? 1) * (P.master ?? 1);
       if (tr.muted || (solo && !tr.solo)) g = 0;
       if (e.gain) e.gain.gain.setTargetAtTime(g, this.audioCtx.currentTime, 0.015);
       else e.el.volume = clamp(g, 0, 1);
+      this.applyAfx(e, c.afx);
       if (remap) {
         // hız rampası / ters: önceden hesaplanmış ses tamponu çalınır
         if (!e.el.paused) e.el.pause();
@@ -281,9 +311,21 @@ export class Player {
     const el = e.el;
     if (el.readyState < 1) return;
     if (playing && this.rate > 0) {
-      const r = clamp(speed * this.rate, 0.0625, 16);
-      if (Math.abs(el.playbackRate - r) > 0.001) el.playbackRate = r;
-      if (Math.abs(el.currentTime - srcTime) > tol * Math.max(1, this.rate)) el.currentTime = srcTime;
+      const base = clamp(speed * this.rate, 0.0625, 16);
+      const drift = el.currentTime - srcTime; // + : öğe ileride
+      const now = performance.now();
+      // büyük kayma: seyrek ve yalnızca önceki konumlama bittiyse atla (sürekli seek sesi tamamen susturur)
+      const hard = Math.max(0.6, tol * this.rate * 3);
+      if (Math.abs(drift) > hard && !el.seeking && (!e.lastSeek || now - e.lastSeek > 800)) {
+        // konumlama gecikmesini (ölçülen) telafi ederek ileri atla
+        if (!e.seekHook) { e.seekHook = true; el.addEventListener('seeked', () => { if (e.seekAt) { e.seekLat = clamp((performance.now() - e.seekAt) / 1000, 0.02, 0.25); e.seekAt = 0; } }); }
+        el.currentTime = srcTime + (e.seekLat ?? 0.12) * base;
+        e.lastSeek = now; e.seekAt = now;
+      }
+      // küçük kayma: hızı hafifçe ayarlayarak yakala
+      let r = base;
+      if (Math.abs(drift) > 0.02 && Math.abs(drift) <= hard) r = base * clamp(1 - drift * 0.5, 0.92, 1.08);
+      if (Math.abs(el.playbackRate - r) > 0.002) el.playbackRate = r;
       if (el.paused) el.play().catch(() => {});
     } else {
       if (!el.paused) el.pause();
@@ -302,6 +344,22 @@ export class Player {
     this._t0 = store.playhead;
     this._n0 = performance.now();
     store.emit('transport', true);
+    // ön hazırlık (preroll): etkin medya öğeleri konumlanıp hazır olana kadar saati başlatma
+    this._prerolling = true;
+    try { this.renderAt(store.playhead, false); } finally { this._prerolling = false; }
+    const startAt = store.playhead;
+    const tStart = performance.now();
+    const active = [...this.pool.entries()].filter(([id]) => {
+      const c = store.clip(id);
+      return c && startAt >= c.start - EPS && startAt < c.start + c.duration;
+    }).map(([, e]) => e);
+    const go = () => {
+      if (!this.playing) return;
+      const ready = active.every((e) => e.el.readyState >= 3 && !e.el.seeking);
+      if (!ready && performance.now() - tStart < 1500) { this._wait = setTimeout(go, 15); return; }
+      this._t0 = store.playhead; this._n0 = performance.now();
+      this._raf = requestAnimationFrame(loop);
+    };
     const loop = () => {
       if (!this.playing) return;
       let t = this._t0 + ((performance.now() - this._n0) / 1000) * this.rate;
@@ -316,7 +374,7 @@ export class Player {
       this.renderAt(store.playhead, this.rate > 0);
       this._raf = requestAnimationFrame(loop);
     };
-    this._raf = requestAnimationFrame(loop);
+    go();
   }
 
   startTime() { const P = store.project; return P.inPoint != null && this.loop ? P.inPoint : 0; }
@@ -332,6 +390,7 @@ export class Player {
     this.playing = false;
     this.rate = 1;
     cancelAnimationFrame(this._raf);
+    clearTimeout(this._wait);
     for (const e of this.pool.values()) { e.el.pause(); this.stopBaked(e, true); }
     store.setPlayhead(store.playhead);
     store.emit('transport', false);

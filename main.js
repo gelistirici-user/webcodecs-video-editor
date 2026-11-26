@@ -32,6 +32,7 @@ async function serveApp(request) {
   } catch { return new Response('Bulunamadı', { status: 404 }); }
 }
 
+const CHUNK = 4 * 1024 * 1024;
 function serveMedia(request) {
   const url = new URL(request.url);
   const filePath = decodeURIComponent(url.pathname.slice(1));
@@ -45,6 +46,8 @@ function serveMedia(request) {
     let start = m && m[1] ? parseInt(m[1], 10) : 0;
     let end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
     if (m && !m[1] && m[2]) { start = Math.max(0, stat.size - parseInt(m[2], 10)); end = stat.size - 1; }
+    // açık uçlu istekleri parçalara böl: oynatıcı konum değiştirince dev akışlar birikmesin
+    if (m && m[1] && !m[2]) end = Math.min(end, start + CHUNK - 1);
     end = Math.min(end, stat.size - 1);
     if (start > end || start >= stat.size) {
       return new Response(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${stat.size}` } });

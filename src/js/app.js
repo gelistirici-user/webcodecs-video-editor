@@ -9,6 +9,7 @@ import { exportVideo, codecSupport, estimateSize } from './exporter.js';
 import { pickMedia, pickSingleMedia, filesFromDrop, saveProject, openProjectFile, projectNameFromPath, isElectron, native } from './platform.js';
 import { TRANSITIONS, COLOR_PRESETS, ANIMATIONS, measureTextBox } from './compositor.js';
 import { animated, writeValue } from './keyframes.js';
+import { normalizeSelected, duckDialog } from './tools.js';
 import { h, clamp, formatTC, formatDur, parseTC, debounce, uid, EPS } from './utils.js';
 import { icon, contextMenu, toast, modal, confirmDialog, promptDialog } from './ui.js';
 
@@ -1107,6 +1108,11 @@ const MENUS = {
     '-',
     { label: 'Video izi ekle', action: () => store.transact('İz ekle', () => store.addTrack('video')) },
     { label: 'Ses izi ekle', action: () => store.transact('İz ekle', () => store.addTrack('audio')) },
+  ],
+  tools: () => [
+    { label: 'Normalleştir: tepe -1 dB', disabled: !store.selection.size, action: () => normalizeSelected('peak') },
+    { label: 'Normalleştir: ses yüksekliği -14 LUFS', disabled: !store.selection.size, action: () => normalizeSelected('lufs') },
+    { label: 'Otomatik ducking (müziği kıs)…', action: duckDialog },
   ],
   view: () => [
     { label: 'Kurgu sayfası', shortcut: 'Alt+1', action: () => setPage('edit') },
