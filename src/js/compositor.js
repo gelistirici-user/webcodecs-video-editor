@@ -3,6 +3,7 @@ import { clamp, smooth, EPS } from './utils.js';
 import { animated, valueAt } from './keyframes.js';
 import { srcTimeAt } from './timemap.js';
 import { applyGrade, gradeActive } from './fxgl.js';
+import { stabAt } from './analysis.js';
 
 export const TRANSITIONS = {
   dissolve: 'Çapraz Geçiş',
@@ -116,6 +117,14 @@ function getLayerCanvas(W, H) {
   const key = `${W}x${H}`;
   let c = layerCanvases.get(key);
   if (!c) { c = document.createElement('canvas'); c.width = W; c.height = H; layerCanvases.set(key, c); }
+  return c;
+}
+
+const maskCanvases = new Map();
+function getMaskCanvas(W, H) {
+  const key = `${W}x${H}`;
+  let c = maskCanvases.get(key);
+  if (!c) { c = document.createElement('canvas'); c.width = W; c.height = H; maskCanvases.set(key, c); }
   return c;
 }
 
@@ -233,7 +242,8 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
 
     const preset = COLOR_PRESETS[col.preset];
     const tint = preset?.tint;
-    const needsLayer = !!(col.temperature || col.tint || col.vignette || tint);
+    const mask = clip.mask?.on ? clip.mask : null;
+    const needsLayer = !!(col.temperature || col.tint || col.vignette || tint || mask);
     const target = needsLayer ? getLayerCanvas(W, H).getContext('2d') : ctx;
     if (needsLayer) target.clearRect(0, 0, W, H);
 
@@ -285,11 +295,36 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
             const gc = applyGrade(src.el, src.w, src.h, clip.grade, (id) => (project.luts || []).find((l) => l.id === id));
             if (gc) { el = gc; fx = gc.width / src.w; }
           }
+          // sabitleme: kaynak titreşimine karşı ters kaydırma + hafif yakınlaştırma
+          const st = clip.stab?.on ? stabAt(clip.stab, L.srcTime) : null;
+          if (st) { target.save(); target.scale(clip.stab.zoom || 1, clip.stab.zoom || 1); target.translate(st[0] * dw, st[1] * dh); }
           try {
             target.drawImage(el, sx * fx, sy * fx, sw * fx, sh * fx, -dw / 2 + dw * tr.cropL, -dh / 2 + dh * tr.cropT, dw * (1 - tr.cropL - tr.cropR), dh * (1 - tr.cropT - tr.cropB));
           } catch { /* kaynak hazır değil */ }
+          if (st) target.restore();
         }
       }
+    }
+    // maske: klibin kendi koordinatlarında (dönüşümle birlikte hareket eder), yumuşak kenarlı
+    if (mask) {
+      const mc = getMaskCanvas(W, H);
+      const mx = mc.getContext('2d');
+      mx.setTransform(1, 0, 0, 1, 0, 0);
+      mx.clearRect(0, 0, W, H);
+      mx.setTransform(target.getTransform());
+      const scl = Math.abs(target.getTransform().a) + Math.abs(target.getTransform().b) || 1;
+      mx.filter = mask.feather > 0 ? `blur(${(mask.feather * k * scl).toFixed(1)}px)` : 'none';
+      mx.fillStyle = '#fff';
+      mx.beginPath();
+      const mw = Math.max(1, mask.w * k), mh = Math.max(1, mask.h * k), mcx = mask.x * k, mcy = mask.y * k;
+      if (mask.shape === 'rect') mx.rect(mcx - mw / 2, mcy - mh / 2, mw, mh); else mx.ellipse(mcx, mcy, mw / 2, mh / 2, 0, 0, Math.PI * 2);
+      mx.fill();
+      mx.filter = 'none';
+      target.setTransform(1, 0, 0, 1, 0, 0);
+      target.filter = 'none';
+      target.globalAlpha = 1;
+      target.globalCompositeOperation = mask.invert ? 'destination-out' : 'destination-in';
+      target.drawImage(mc, 0, 0);
     }
     target.restore();
 

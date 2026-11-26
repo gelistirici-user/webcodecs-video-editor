@@ -411,3 +411,9 @@ kbd { font: 11px var(--mono); background: var(--bg0); border: 1px solid var(--li
 .lut-name { font-size: 12px; color: var(--tx2); align-self: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-row.tight { margin: 0; align-items: center; }
 .frame.picking, .frame.picking * { cursor: crosshair !important; }
+
+/* maske kutusu */
+.ov-mask { position: absolute; border: 1.5px dashed #ffd34d; box-shadow: 0 0 0 1px rgba(0,0,0,.5); cursor: move; transform-origin: center; }
+.ov-mask.ellipse { border-radius: 50%; }
+.ov-mask .ov-handle { background: #ffd34d; }
+.stab-status { font-size: 12px; color: var(--tx2); margin: 4px 0; }

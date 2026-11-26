@@ -7,6 +7,7 @@ import { TRANSITIONS, COLOR_PRESETS, ANIMATIONS, BLENDS } from './compositor.js'
 import { DEFAULT_AFX } from './audiofx.js';
 import { wheel, curveEditor, lutControls, keyControls, ensureGrade } from './colorui.js';
 import { DEFAULT_GRADE } from './fxgl.js';
+import { maskSection, stabSection } from './motionui.js';
 import { normalizeSelected } from './tools.js';
 
 const FONTS = ['Segoe UI', 'Arial', 'Arial Black', 'Bahnschrift', 'Calibri', 'Cambria', 'Candara', 'Comic Sans MS', 'Consolas', 'Constantia', 'Corbel', 'Courier New', 'Georgia', 'Impact', 'Lucida Console', 'Palatino Linotype', 'Segoe Print', 'Segoe Script', 'Tahoma', 'Times New Roman', 'Trebuchet MS', 'Verdana'];
@@ -74,6 +75,10 @@ export class Inspector {
       if (vClip.type === 'color') this.fillSection(vClip);
       this.motionSection(vClip);
       this.opacitySection(vClip);
+      if (this.page !== 'color') {
+        this.section('mask', 'Maske ve Takip', (b) => maskSection(this, b, vClip));
+        if (vClip.type === 'media' && store.media(vClip.mediaId)?.kind === 'video') this.section('stab', 'Görüntü Sabitleme', (b) => stabSection(this, b, vClip));
+      }
       if (this.page !== 'color') this.colorSection(vClip);
       if (this.page !== 'color' && vClip.type === 'media') this.section('key', 'Chroma Key (yeşil perde)', (b) => keyControls(this, b, vClip, (cb) => this.pickColor?.(cb)));
       this.animSection(vClip);

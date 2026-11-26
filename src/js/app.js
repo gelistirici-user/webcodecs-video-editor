@@ -120,6 +120,7 @@ function drawOverlay() {
   Object.assign(box.style, { width: b.w * k + 'px', height: b.h * k + 'px', left: (b.cx - b.w / 2) * k + 'px', top: (b.cy - b.h / 2) * k + 'px', transform: `rotate(${b.rot}deg)` });
   for (const pos of ['nw', 'ne', 'sw', 'se']) box.append(h('div', { class: `ov-handle ${pos}`, 'data-h': pos }));
   overlay.append(box);
+  if (c.mask?.on) drawMaskOverlay(c, b, k);
   box.addEventListener('pointerdown', (e) => {
     if (store.track(c.trackId).locked) return;
     e.preventDefault(); e.stopPropagation();
@@ -159,6 +160,43 @@ function drawOverlay() {
       window.removeEventListener('pointerup', up);
       store.commit(handle ? 'Ölçekle' : 'Taşı (monitör)');
     };
+    window.addEventListener('pointermove', mv);
+    window.addEventListener('pointerup', up);
+  });
+}
+// maske kutusu: monitörde sürükle (taşı) / köşelerden boyutlandır
+function drawMaskOverlay(c, b, k) {
+  const A = animated(c, store.playhead);
+  const M = A.mask, sc = A.transform.scale, rot = (A.transform.rotation * Math.PI) / 180;
+  const ox = M.x * sc, oy = M.y * sc;
+  const cx = b.cx + ox * Math.cos(rot) - oy * Math.sin(rot), cy = b.cy + ox * Math.sin(rot) + oy * Math.cos(rot);
+  const w = M.w * sc, hh = M.h * sc;
+  const mb = h('div', { class: 'ov-mask' + (M.shape === 'rect' ? '' : ' ellipse'), title: 'Maske: sürükle = taşı · köşeler = boyutlandır' });
+  Object.assign(mb.style, { width: w * k + 'px', height: hh * k + 'px', left: (cx - w / 2) * k + 'px', top: (cy - hh / 2) * k + 'px', transform: `rotate(${A.transform.rotation}deg)` });
+  for (const pos of ['nw', 'ne', 'sw', 'se']) mb.append(h('div', { class: `ov-handle ${pos}`, 'data-h': pos }));
+  overlay.append(mb);
+  mb.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    try { mb.setPointerCapture(e.pointerId); } catch { /* */ }
+    const handle = e.target.dataset.h;
+    const o = { x: e.clientX, y: e.clientY, mx: M.x, my: M.y, mw: M.w, mh: M.h };
+    const cos = Math.cos(-rot), sin = Math.sin(-rot);
+    store.begin();
+    const mv = (ev) => {
+      const dxs = (ev.clientX - o.x) / k / sc, dys = (ev.clientY - o.y) / k / sc;
+      const lx = dxs * cos - dys * sin, ly = dxs * sin + dys * cos; // klip yerel ekseni
+      if (handle) {
+        const sx = handle.includes('e') ? 1 : -1, sy = handle.includes('s') ? 1 : -1;
+        writeValue(c, 'mask.w', store.playhead, Math.max(10, Math.round(o.mw + 2 * sx * lx)));
+        writeValue(c, 'mask.h', store.playhead, Math.max(10, Math.round(o.mh + 2 * sy * ly)));
+      } else {
+        writeValue(c, 'mask.x', store.playhead, Math.round(o.mx + lx));
+        writeValue(c, 'mask.y', store.playhead, Math.round(o.my + ly));
+      }
+      store.emit('change', { live: true });
+      drawOverlay();
+    };
+    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); store.commit(handle ? 'Maske boyutu' : 'Maskeyi taşı'); };
     window.addEventListener('pointermove', mv);
     window.addEventListener('pointerup', up);
   });
