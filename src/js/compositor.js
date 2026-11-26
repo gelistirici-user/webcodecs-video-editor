@@ -51,6 +51,58 @@ export const BLENDS = {
 
 const mediaTime = (clip, t, media) => srcTimeAt(clip, t, media);
 
+// İç içe sekans verisi (etkin sekans proje üst düzeyindedir)
+export function seqOf(P, id) {
+  if (!id || id === P.activeSeq?.id) return P;
+  const q = (P.sequences || []).find((x) => x.id === id);
+  return q ? { ...P, tracks: q.tracks, clips: q.clips, markers: q.markers || [] } : null;
+}
+
+/**
+ * t anında (ve yakınında) oynatılması gereken tüm medya örnekleri; iç içe sekanslara iner.
+ * { key, clip, kind: 'video'|'audio', t (kendi sekansındaki zaman), active, gain (üst kazançlar) }
+ */
+export function collectInstances(P, t, ahead = 1.5, prefix = '', depth = 0, parentGain = 1, kindFilter = null, parentActive = true) {
+  const out = [];
+  const solo = P.tracks.some((tr) => tr.kind === 'audio' && tr.solo);
+  for (const c of P.clips) {
+    const tr = P.tracks.find((x) => x.id === c.trackId);
+    if (!tr || c.muted) continue;
+    if (kindFilter && tr.kind !== kindFilter) continue;
+    if (tr.kind === 'video' && tr.hidden) continue;
+    if (!(t >= c.start - ahead && t < c.start + c.duration + 0.5)) continue;
+    const active = parentActive && t >= c.start - EPS && t < c.start + c.duration - EPS;
+    let g = parentGain;
+    if (tr.kind === 'audio') g *= tr.muted || (solo && !tr.solo) ? 0 : tr.volume ?? 1;
+    if (c.type === 'seq') {
+      if (depth >= 4) continue;
+      const inner = seqOf(P, c.seqId);
+      if (!inner || inner === P) continue;
+      const ti = srcTimeAt(c, clamp(t, c.start, c.start + c.duration - 1e-3));
+      if (tr.kind === 'audio') g *= audioGain(c, clamp(t, c.start, c.start + c.duration));
+      out.push(...collectInstances(inner, ti, active ? ahead : 0.1, prefix + c.id + '/', depth + 1, g, tr.kind, active));
+      continue;
+    }
+    if (c.type !== 'media') continue;
+    out.push({ key: prefix + c.id, clip: c, kind: tr.kind, t, active, gain: g });
+  }
+  return out;
+}
+
+// Dışa aktarma planı için: t anında görünen tüm medya katmanları (iç içe dahil), poolKey ile
+export function flatMediaLayers(P, t, mm, prefix = '', depth = 0) {
+  const out = [];
+  for (const L of layersAt(P, t, mm)) {
+    if (!L.clip) continue;
+    if (L.clip.type === 'media') out.push({ ...L, poolKey: prefix + L.clip.id });
+    else if (L.clip.type === 'seq' && depth < 4) {
+      const inner = seqOf(P, L.clip.seqId);
+      if (inner && inner !== P) out.push(...flatMediaLayers(inner, L.srcTime, mm, prefix + L.clip.id + '/', depth + 1));
+    }
+  }
+  return out;
+}
+
 // t anında görünen katmanlar (alttan üste)
 export function layersAt(project, t, mediaById) {
   const layers = [];
@@ -113,16 +165,23 @@ export function buildFilter(color) {
 }
 
 const layerCanvases = new Map();
-function getLayerCanvas(W, H) {
-  const key = `${W}x${H}`;
+function getLayerCanvas(W, H, depth = 0) {
+  const key = `${W}x${H}@${depth}`;
   let c = layerCanvases.get(key);
   if (!c) { c = document.createElement('canvas'); c.width = W; c.height = H; layerCanvases.set(key, c); }
   return c;
 }
 
 const maskCanvases = new Map();
-function getMaskCanvas(W, H) {
-  const key = `${W}x${H}`;
+const nestCanvases = new Map();
+function getNestCanvas(W, H, depth) {
+  const key = `${W}x${H}@${depth}`;
+  let c = nestCanvases.get(key);
+  if (!c) { c = document.createElement('canvas'); c.width = W; c.height = H; nestCanvases.set(key, c); }
+  return c;
+}
+function getMaskCanvas(W, H, depth = 0) {
+  const key = `${W}x${H}@${depth}`;
   let c = maskCanvases.get(key);
   if (!c) { c = document.createElement('canvas'); c.width = W; c.height = H; maskCanvases.set(key, c); }
   return c;
@@ -214,15 +273,17 @@ function drawText(ctx, clip, k, W, H, chars) {
  * Kareyi çizer.
  * getSource(layer) -> { el, w, h } | null  (video/img/canvas)
  */
-export function drawFrame(ctx, W, H, project, t, layers, getSource) {
+export function drawFrame(ctx, W, H, project, t, layers, getSource, { depth = 0, transparent = false } = {}) {
   const k = W / project.settings.width;
   ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
   ctx.filter = 'none';
-  ctx.fillStyle = project.settings.background || '#000';
-  ctx.fillRect(0, 0, W, H);
+  if (transparent) ctx.clearRect(0, 0, W, H);
+  else { ctx.fillStyle = project.settings.background || '#000'; ctx.fillRect(0, 0, W, H); }
   ctx.restore();
+  let mm = null;
 
   for (const L of layers) {
     if (L.fill) {
@@ -235,6 +296,19 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
     }
     const clip = animated(L.clip, t);
     const tr = clip.transform;
+    // iç içe sekans: önce kendi tuvaline çiz (katman tuvalleri derinliğe göre ayrı)
+    let nested = null;
+    if (clip.type === 'seq' && depth < 4) {
+      const inner = seqOf(project, clip.seqId);
+      if (inner && inner !== project) {
+        if (!mm) mm = new Map(project.media.map((m) => [m.id, m]));
+        const oc = getNestCanvas(W, H, depth + 1);
+        const pk = (L.poolKey || L.clip.id) + '/';
+        const innerLayers = layersAt(inner, L.srcTime, mm).map((IL) => (IL.clip ? { ...IL, poolKey: pk + IL.clip.id } : IL));
+        drawFrame(oc.getContext('2d'), W, H, inner, L.srcTime, innerLayers, getSource, { depth: depth + 1, transparent: true });
+        nested = oc;
+      }
+    }
     const col = clip.color;
     const an = animState(clip, t);
     const alpha = clamp(L.alpha * tr.opacity * fadeAlpha(clip, t) * an.alpha, 0, 1);
@@ -244,7 +318,7 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
     const tint = preset?.tint;
     const mask = clip.mask?.on ? clip.mask : null;
     const needsLayer = !!(col.temperature || col.tint || col.vignette || tint || mask);
-    const target = needsLayer ? getLayerCanvas(W, H).getContext('2d') : ctx;
+    const target = needsLayer ? getLayerCanvas(W, H, depth).getContext('2d') : ctx;
     if (needsLayer) target.clearRect(0, 0, W, H);
 
     target.save();
@@ -274,7 +348,7 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
     } else if (clip.type === 'text') {
       drawText(target, clip, k, W, H, an.chars);
     } else {
-      const src = getSource(L);
+      const src = clip.type === 'seq' ? (nested ? { el: nested, w: W, h: H } : null) : getSource(L);
       if (src && src.offline) {
         target.fillStyle = '#5c1418';
         target.fillRect(-W / 2, -H / 2, W, H);
@@ -307,7 +381,7 @@ export function drawFrame(ctx, W, H, project, t, layers, getSource) {
     }
     // maske: klibin kendi koordinatlarında (dönüşümle birlikte hareket eder), yumuşak kenarlı
     if (mask) {
-      const mc = getMaskCanvas(W, H);
+      const mc = getMaskCanvas(W, H, depth);
       const mx = mc.getContext('2d');
       mx.setTransform(1, 0, 0, 1, 0, 0);
       mx.clearRect(0, 0, W, H);

@@ -23,8 +23,17 @@ export function newProject() {
     inPoint: null,
     outPoint: null,
     master: 1,
+    activeSeq: { id: uid('s'), name: 'Sekans 1' },
+    sequences: [], // etkin olmayan sekanslar: { id, name, tracks, clips, markers, inPoint, outPoint }
   };
 }
+
+const freshTracks = () => [
+  { id: uid('t'), kind: 'video', name: 'V1', muted: false, locked: false, hidden: false },
+  { id: uid('t'), kind: 'video', name: 'V2', muted: false, locked: false, hidden: false },
+  { id: uid('t'), kind: 'audio', name: 'A1', muted: false, locked: false, solo: false, volume: 1 },
+  { id: uid('t'), kind: 'audio', name: 'A2', muted: false, locked: false, solo: false, volume: 1 },
+];
 
 export function makeClip(type, props = {}) {
   const base = {
@@ -103,6 +112,7 @@ class Store {
   }
   load(project, filePath = null) {
     this.project = project;
+    this.ensureSeqs();
     this.filePath = filePath;
     this.undoStack = [];
     this.redoStack = [];
@@ -112,6 +122,120 @@ class Store {
     this.emit('load');
     this.emit('change', { load: true });
     this.emit('selection');
+  }
+
+  // ---------- sekanslar ----------
+  ensureSeqs() {
+    const P = this.project;
+    if (!P.activeSeq) P.activeSeq = { id: uid('s'), name: 'Sekans 1' };
+    if (!P.sequences) P.sequences = [];
+  }
+  sequenceList() {
+    this.ensureSeqs();
+    const P = this.project;
+    const all = [{ id: P.activeSeq.id, name: P.activeSeq.name, active: true }, ...P.sequences.map((q) => ({ id: q.id, name: q.name, active: false }))];
+    // sekme sırası sabit kalsın (etkin sekans değişince yer değiştirmesin)
+    const order = (P.seqOrder || []).filter((id) => all.some((q) => q.id === id));
+    for (const q of all) if (!order.includes(q.id)) order.push(q.id);
+    P.seqOrder = order;
+    return order.map((id) => all.find((q) => q.id === id));
+  }
+  // iç içe veri: etkin sekans üst düzey alanlarda, diğerleri sequences içinde
+  seqData(id) {
+    const P = this.project;
+    if (!id || id === P.activeSeq?.id) return P;
+    const q = (P.sequences || []).find((x) => x.id === id);
+    return q ? { ...P, tracks: q.tracks, clips: q.clips, markers: q.markers || [] } : null;
+  }
+  seqName(id) { return this.sequenceList().find((x) => x.id === id)?.name || 'Sekans'; }
+  seqDuration(id) { const d = this.seqData(id); return d ? d.clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0) : 0; }
+  // id sekansı, from sekansının içinde (doğrudan/dolaylı) kullanılıyor mu? (döngü engeli)
+  seqContains(from, id, depth = 0) {
+    if (from === id) return true;
+    if (depth > 8) return true;
+    const d = this.seqData(from);
+    return !!d && d.clips.some((c) => c.type === 'seq' && this.seqContains(c.seqId, id, depth + 1));
+  }
+  // begin/commit içinde çağrılır
+  switchSequence(id) {
+    this.ensureSeqs();
+    const P = this.project;
+    if (id === P.activeSeq.id) return false;
+    const i = P.sequences.findIndex((x) => x.id === id);
+    if (i < 0) return false;
+    const target = P.sequences[i];
+    P.sequences[i] = { id: P.activeSeq.id, name: P.activeSeq.name, tracks: P.tracks, clips: P.clips, markers: P.markers, inPoint: P.inPoint, outPoint: P.outPoint, playhead: this.playhead };
+    P.activeSeq = { id: target.id, name: target.name };
+    P.tracks = target.tracks; P.clips = target.clips; P.markers = target.markers || []; P.inPoint = target.inPoint ?? null; P.outPoint = target.outPoint ?? null;
+    this.selection.clear();
+    this.playhead = target.playhead || 0;
+    return true;
+  }
+  newSequence(name) {
+    this.ensureSeqs();
+    const q = { id: uid('s'), name: name || `Sekans ${this.sequenceList().length + 1}`, tracks: freshTracks(), clips: [], markers: [], inPoint: null, outPoint: null };
+    this.project.sequences.push(q);
+    return q;
+  }
+  renameSequence(id, name) {
+    const P = this.project;
+    if (P.activeSeq.id === id) P.activeSeq.name = name; else { const q = P.sequences.find((x) => x.id === id); if (q) q.name = name; }
+  }
+  deleteSequence(id) {
+    const P = this.project;
+    if (P.activeSeq.id === id || this.sequenceList().length < 2) return false;
+    P.sequences = P.sequences.filter((x) => x.id !== id);
+    // bu sekansa başvuran iç içe klipleri kaldır
+    const strip = (clips) => clips.filter((c) => !(c.type === 'seq' && c.seqId === id));
+    P.clips = strip(P.clips);
+    P.sequences.forEach((q) => { q.clips = strip(q.clips); });
+    this.cleanupLinks();
+    return true;
+  }
+  // Seçili klipleri yeni bir sekansa taşı, yerine iç içe sekans klibi koy (Premiere "Nest")
+  nestSelection(name) {
+    this.ensureSeqs();
+    const P = this.project;
+    const sel = this.selectedClips();
+    if (!sel.length) return null;
+    const t0 = Math.min(...sel.map((c) => c.start));
+    const t1 = Math.max(...sel.map((c) => c.start + c.duration));
+    const usedTracks = P.tracks.filter((t) => sel.some((c) => c.trackId === t.id));
+    // yeni sekansın izleri: kullanılan izlerin kopyaları (aynı sırayla)
+    const map = new Map();
+    const tracks = P.tracks.filter((t) => usedTracks.includes(t)).map((t) => { const n = { ...t, id: uid('t') }; map.set(t.id, n.id); return n; });
+    if (!tracks.some((t) => t.kind === 'video')) tracks.unshift({ id: uid('t'), kind: 'video', name: 'V1', muted: false, locked: false, hidden: false });
+    if (!tracks.some((t) => t.kind === 'audio')) tracks.push({ id: uid('t'), kind: 'audio', name: 'A1', muted: false, locked: false, solo: false, volume: 1 });
+    const inner = sel.map((c) => ({ ...JSON.parse(JSON.stringify(c)), trackId: map.get(c.trackId), start: c.start - t0 }));
+    const q = { id: uid('s'), name: name || `İç içe ${this.sequenceList().length}`, tracks, clips: inner, markers: [], inPoint: null, outPoint: null };
+    P.sequences.push(q);
+    const ids = new Set(sel.map((c) => c.id));
+    P.clips = P.clips.filter((c) => !ids.has(c.id));
+    this.cleanupLinks();
+    const vt = sel.find((c) => this.track(c.trackId).kind === 'video') ? sel.filter((c) => this.track(c.trackId).kind === 'video').map((c) => this.track(c.trackId)).sort((a, b) => P.tracks.indexOf(a) - P.tracks.indexOf(b))[0] : null;
+    const at = sel.find((c) => this.track(c.trackId).kind === 'audio') ? this.track(sel.find((c) => this.track(c.trackId).kind === 'audio').trackId) : null;
+    const link = vt && at ? uid('l') : null;
+    const made = [];
+    if (vt) { const c = makeClip('seq', { seqId: q.id, trackId: vt.id, start: t0, duration: t1 - t0, linkId: link, name: q.name }); P.clips.push(c); made.push(c); }
+    if (at) { const c = makeClip('seq', { seqId: q.id, trackId: at.id, start: t0, duration: t1 - t0, linkId: link, name: q.name }); P.clips.push(c); made.push(c); }
+    this.selection = new Set(made.map((c) => c.id));
+    return q;
+  }
+  // Etkin sekansa başka bir sekansı iç içe klip olarak yerleştir
+  placeSequence(id, start) {
+    const P = this.project;
+    if (this.seqContains(id, P.activeSeq.id)) return null;
+    const d = this.seqDuration(id);
+    if (d <= 0) return null;
+    const vt = this.videoTracks()[0], at = this.audioTracks()[0];
+    const link = uid('l');
+    const made = [];
+    for (const t of [vt, at].filter(Boolean)) {
+      this.clearRange(t.id, start, start + d);
+      const c = makeClip('seq', { seqId: id, trackId: t.id, start, duration: d, linkId: link, name: this.seqName(id) });
+      P.clips.push(c); made.push(c);
+    }
+    return made;
   }
 
   // ---------- erişim ----------
@@ -142,6 +266,7 @@ class Store {
 
   // ---------- kurgu işlemleri (begin/commit dışarıda) ----------
   mediaMaxDur(clip) {
+    if (clip.type === 'seq') return (this.seqDuration(clip.seqId) - clip.in) / clip.speed;
     if (clip.type !== 'media') return Infinity;
     const m = this.media(clip.mediaId);
     if (!m || m.kind === 'image') return Infinity;
@@ -353,7 +478,7 @@ class Store {
     const fps = this.fps;
     const min = 1 / fps;
     const neighbors = this.clipsOn(clip.trackId).filter((c) => c.id !== clip.id);
-    const m = clip.type === 'media' ? this.media(clip.mediaId) : null;
+    const m = clip.type === 'media' ? this.media(clip.mediaId) : clip.type === 'seq' ? { duration: this.seqDuration(clip.seqId), kind: 'seq' } : null;
     const hasSrcLimit = m && m.kind !== 'image';
     if (edge === 'left') {
       const end = original.start + original.duration;

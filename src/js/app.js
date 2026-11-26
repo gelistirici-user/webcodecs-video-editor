@@ -11,6 +11,7 @@ import { TRANSITIONS, COLOR_PRESETS, ANIMATIONS, measureTextBox } from './compos
 import { animated, writeValue } from './keyframes.js';
 import { normalizeSelected, duckDialog, silenceDialog } from './tools.js';
 import { transcribeDialog, exportSrt, importSrtDialog } from './subtitles.js';
+import { buildSeqTabs, openSequence, newSequence, nestSelection } from './sequences.js';
 import { h, clamp, formatTC, formatDur, parseTC, debounce, uid, EPS } from './utils.js';
 import { icon, contextMenu, toast, modal, confirmDialog, promptDialog } from './ui.js';
 
@@ -1145,6 +1146,9 @@ const MENUS = {
     { label: 'Renk katmanı ekle', action: () => addColorAt(store.playhead, GEN_PRESETS[0].p) },
     { label: 'İşaretçi ekle', shortcut: 'M', action: () => addMarker() },
     '-',
+    { label: 'Yeni sekans…', action: newSequence },
+    { label: 'Seçimi iç içe sekansa dönüştür…', disabled: !store.selection.size, action: nestSelection },
+    '-',
     { label: 'Video izi ekle', action: () => store.transact('İz ekle', () => store.addTrack('video')) },
     { label: 'Ses izi ekle', action: () => store.transact('İz ekle', () => store.addTrack('audio')) },
   ],
@@ -1319,6 +1323,9 @@ inspector.pickColor = (cb) => {
 for (const c of [$('#programCanvas'), $('.tl-canvas'), $('.tl-ruler'), $('#scopeCanvas')]) {
   c?.addEventListener('contextrestored', () => { player.requestRender(); timeline.request(); scopes.update(true); });
 }
+
+buildSeqTabs($('#seqTabs'));
+store.on('open-sequence', (id) => openSequence(id));
 
 // ---------- başlat ----------
 buildMediaPanel();

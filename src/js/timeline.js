@@ -13,7 +13,7 @@ const ROW_H = { video: 62, audio: 54 };
 const EDGE = 7;
 const COLORS = {
   video: ['#3b63c4', '#5b84e8'], audio: ['#22805a', '#39b07d'], image: ['#7a4fc0', '#9c74e0'],
-  text: ['#b86f1e', '#e09a46'], color: ['#a8406f', '#d06495'], offline: ['#7a2b2b', '#a33'],
+  text: ['#b86f1e', '#e09a46'], color: ['#a8406f', '#d06495'], offline: ['#7a2b2b', '#a33'], seq: ['#3f5f73', '#5c8aa6'],
 };
 
 export class Timeline {
@@ -42,6 +42,7 @@ export class Timeline {
     store.on('playhead', () => { this.followPlayhead(); this.request(); });
     store.on('media-cache', () => this.request());
     store.on('load', () => { this.scroller.scrollLeft = 0; this.zoomToFit(); });
+    store.on('sequence', () => { this.buildHeaders(); this.scroller.scrollLeft = 0; this.zoomToFit(); });
     this._availH = this.scroller.clientHeight;
     new ResizeObserver(() => {
       const hh = this.scroller.clientHeight;
@@ -396,7 +397,7 @@ export class Timeline {
     ctx.globalAlpha = 1;
     ctx.fillStyle = '#fff';
     ctx.font = '600 11px "Segoe UI", sans-serif';
-    let label = c.type === 'text' ? 'Metin' : c.type === 'color' ? 'Renk' : (m?.name || 'Medya');
+    let label = c.type === 'text' ? 'Metin' : c.type === 'color' ? 'Renk' : c.type === 'seq' ? '▣ ' + store.seqName(c.seqId) : (m?.name || 'Medya');
     const badges = [];
     if (c.reverse) badges.push('◀');
     if (hasKf(c, 'speed')) badges.push('rampa');
@@ -612,6 +613,7 @@ export class Timeline {
     this.canvas.addEventListener('pointerleave', () => { if (!this.op) { this.hover = null; this.request(); } });
     this.canvas.addEventListener('dblclick', (e) => {
       const hit = this.hit(e);
+      if (hit.clip?.type === 'seq') { store.emit('open-sequence', hit.clip.seqId); return; }
       if (hit.clip) store.emit('focus-inspector', hit.clip.id);
     });
     this.canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); this.onContext(e); });

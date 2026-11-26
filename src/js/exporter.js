@@ -4,7 +4,7 @@ import {
   Input, UrlSource, ALL_FORMATS, CanvasSink, getFirstEncodableVideoCodec, getFirstEncodableAudioCodec,
 } from '../vendor/mediabunny.mjs';
 import { store } from './store.js';
-import { layersAt, drawFrame } from './compositor.js';
+import { layersAt, drawFrame, flatMediaLayers, seqOf } from './compositor.js';
 import { decodeAudio } from './media.js';
 import { native, isElectron } from './platform.js';
 import { clamp, EPS } from './utils.js';
@@ -12,7 +12,7 @@ import { hasKf, sampleVolume } from './keyframes.js';
 import { isRemapped, bakeClipAudio, WindowSource } from './timemap.js';
 import { buildChain, ensureWorklet, afxActive } from './audiofx.js';
 
-export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
+export async function renderAudioMix(project, t0, t1, sampleRate = 48000, depth = 0) {
   const len = Math.max(1, Math.ceil((t1 - t0) * sampleRate));
   const ctx = new OfflineAudioContext(2, len, sampleRate);
   const master = ctx.createGain();
@@ -25,20 +25,32 @@ export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
   const workletOk = project.clips.some((c) => c.afx?.denoise > 0) ? await ensureWorklet(ctx) : false;
   for (const c of project.clips) {
     const tr = tracks.find((t) => t.id === c.trackId);
-    if (!tr || tr.muted || (solo && !tr.solo) || c.muted || c.type !== 'media') continue;
-    const m = project.media.find((x) => x.id === c.mediaId);
-    if (!m || m.offline || !m.url || !(m.kind === 'audio' || m.hasAudio)) continue;
+    if (!tr || tr.muted || (solo && !tr.solo) || c.muted) continue;
     const cs = c.start, ce = c.start + c.duration;
     if (ce <= t0 || cs >= t1) continue;
-    if (!buffers.has(m.id)) {
-      try { buffers.set(m.id, await decodeAudio(m.url)); } catch { buffers.set(m.id, null); }
+    let buf = null, m = null, nested = false;
+    if (c.type === 'seq') {
+      // iç içe sekans: kendi karışımını oluştur (klip aralığı kadar)
+      const inner = depth < 4 ? seqOf(project, c.seqId) : null;
+      if (!inner || inner === project) continue;
+      const a = Math.max(cs, t0), b = Math.min(ce, t1);
+      buf = await renderAudioMix({ ...inner, master: 1 }, c.in + (a - cs) * c.speed, c.in + (b - cs) * c.speed, sampleRate, depth + 1);
+      if (!buf) continue;
+      nested = true;
+    } else {
+      if (c.type !== 'media') continue;
+      m = project.media.find((x) => x.id === c.mediaId);
+      if (!m || m.offline || !m.url || !(m.kind === 'audio' || m.hasAudio)) continue;
+      if (!buffers.has(m.id)) {
+        try { buffers.set(m.id, await decodeAudio(m.url)); } catch { buffers.set(m.id, null); }
+      }
+      buf = buffers.get(m.id);
+      if (!buf) continue;
     }
-    const buf = buffers.get(m.id);
-    if (!buf) continue;
-    const remap = isRemapped(c);
+    const remap = !nested && isRemapped(c);
     const src = ctx.createBufferSource();
     src.buffer = remap ? bakeClipAudio(c, buf, m.duration) : buf;
-    src.playbackRate.value = remap ? 1 : c.speed;
+    src.playbackRate.value = remap || nested ? 1 : c.speed;
     const g = ctx.createGain();
     const animVol = hasKf(c, 'volume');
     const vol = (animVol ? 1 : c.volume) * (tr.volume ?? 1);
@@ -64,8 +76,8 @@ export async function renderAudioMix(project, t0, t1, sampleRate = 48000) {
     }
     const skip = Math.max(0, t0 - cs);
     const when = Math.max(0, cs - t0);
-    const offset = remap ? skip : c.in + skip * c.speed;
-    const dur = (Math.min(ce, t1) - Math.max(cs, t0)) * (remap ? 1 : c.speed);
+    const offset = nested ? 0 : remap ? skip : c.in + skip * c.speed;
+    const dur = (Math.min(ce, t1) - Math.max(cs, t0)) * (remap || nested ? 1 : c.speed);
     if (dur <= 0) continue;
     src.start(when, offset, dur);
     any = true;
@@ -143,12 +155,11 @@ export async function exportVideo(opts) {
   const plan = new Map();
   for (let i = 0; i < totalFrames; i++) {
     const t = t0 + i / fps;
-    for (const L of layersAt(P, t, mm)) {
-      if (!L.clip || L.clip.type !== 'media') continue;
+    for (const L of flatMediaLayers(P, t, mm)) {
       const m = mm.get(L.clip.mediaId);
       if (!m || m.kind !== 'video' || m.offline) continue;
-      if (!plan.has(L.clip.id)) plan.set(L.clip.id, { mediaId: m.id, times: [] });
-      plan.get(L.clip.id).times.push(L.srcTime);
+      if (!plan.has(L.poolKey)) plan.set(L.poolKey, { mediaId: m.id, clip: L.clip, times: [] });
+      plan.get(L.poolKey).times.push(L.srcTime);
     }
   }
   const inputs = new Map();
@@ -166,7 +177,7 @@ export async function exportVideo(opts) {
     const m = mm.get(p.mediaId);
     const track = await getTrack(m);
     if (!track || !(await track.canDecode())) throw new Error(`"${m.name}" çözümlenemiyor (desteklenmeyen kodek).`);
-    const clip = P.clips.find((c) => c.id === clipId);
+    const clip = p.clip;
     if (clip?.reverse) {
       // ters klip: kaynağı küçük pencerelerde ileri çözerek geriye doğru kare ver
       const ws = new WindowSource(m.url, { maxW: 4096, win: 0.4, keep: 2 });
@@ -209,19 +220,18 @@ export async function exportVideo(opts) {
       const t = t0 + i / fps;
       const layers = layersAt(P, t, mm);
       const frameSources = new Map();
-      for (const L of layers) {
-        if (!L.clip || L.clip.type !== 'media') continue;
-        const gen = gens.get(L.clip.id);
+      for (const L of flatMediaLayers(P, t, mm)) {
+        const gen = gens.get(L.poolKey);
         if (!gen) continue;
         const r = await gen.next();
-        const wc = r.value || lastFrame.get(L.clip.id);
-        if (wc) { lastFrame.set(L.clip.id, wc); frameSources.set(L.clip.id, wc.canvas); }
+        const wc = r.value || lastFrame.get(L.poolKey);
+        if (wc) { lastFrame.set(L.poolKey, wc); frameSources.set(L.poolKey, wc.canvas); }
       }
       drawFrame(ctx, width, height, P, t, layers, (L) => {
         const m = mm.get(L.clip.mediaId);
         if (!m) return null;
         if (m.kind === 'image') { const img = images.get(m.id); return img ? { el: img, w: img.naturalWidth, h: img.naturalHeight } : null; }
-        const c = frameSources.get(L.clip.id);
+        const c = frameSources.get(L.poolKey || L.clip.id);
         return c ? { el: c, w: c.width, h: c.height } : null;
       });
       await videoSource.add(i / fps, 1 / fps);

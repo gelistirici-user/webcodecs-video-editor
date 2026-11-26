@@ -1,6 +1,6 @@
 // Oynatma motoru: video/ses öğe havuzu, saat, ses ölçerleri
 import { store } from './store.js';
-import { layersAt, drawFrame, audioGain } from './compositor.js';
+import { layersAt, drawFrame, audioGain, collectInstances } from './compositor.js';
 import { clamp, EPS } from './utils.js';
 import { buildChain, ensureWorklet, afxActive } from './audiofx.js';
 import { isRemapped, speedAt, srcTimeAt, srcSpan, bakeClipAudio, decodeSegment, WindowSource } from './timemap.js';
@@ -89,13 +89,11 @@ export class Player {
 
   mediaMap() { return new Map(store.project.media.map((m) => [m.id, m])); }
 
-  getEntry(clip, media) {
-    let e = this.pool.get(clip.id);
-    if (e && e.url === media.url) return e;
-    if (e) this.release(clip.id);
+  getEntry(key, kind, media) {
+    let e = this.pool.get(key);
+    if (e && e.url === media.url && e.kind === kind) return e;
+    if (e) this.release(key);
     if (media.offline || !media.url) return null;
-    const track = store.track(clip.trackId);
-    const kind = track.kind;
     const el = document.createElement(kind === 'audio' ? 'audio' : 'video');
     el.crossOrigin = 'anonymous';
     el.preload = 'auto';
@@ -106,7 +104,7 @@ export class Player {
     el.addEventListener('seeked', () => { if (!this.playing) this.requestRender(); });
     el.addEventListener('loadeddata', () => { if (!this.playing) this.requestRender(); });
     e = { el, kind, mediaId: media.id, url: media.url, gain: null };
-    this.pool.set(clip.id, e);
+    this.pool.set(key, e);
     if (kind === 'audio') this.connectAudio(e);
     return e;
   }
@@ -133,27 +131,23 @@ export class Player {
     return img;
   }
 
-  // Görünür ve yakındaki klipler için öğeleri hazırla, uzak olanları bırak
-  syncPool(t, layers, mm) {
-    const P = store.project;
+  // Görünür ve yakındaki klipler (iç içe sekanslar dahil) için öğeleri hazırla, uzak olanları bırak
+  syncPool(insts, mm) {
     const keep = new Set();
-    for (const c of P.clips) {
-      if (c.type !== 'media') continue;
+    for (const I of insts) {
+      const c = I.clip;
       const m = mm.get(c.mediaId);
       if (!m || m.kind === 'image') continue;
-      const tr = store.track(c.trackId);
-      if (!tr) continue;
-      if (tr.kind === 'audio' && m.kind !== 'audio' && !m.hasAudio) continue;
-      const near = t >= c.start - LOOKAHEAD && t < c.start + c.duration + 0.5;
-      if (!near) continue;
-      keep.add(c.id);
-      const e = this.getEntry(c, m);
+      if (I.kind === 'audio' && m.kind !== 'audio' && !m.hasAudio) continue;
+      if (I.kind === 'video' && m.kind !== 'video') continue;
+      keep.add(I.key);
+      const e = this.getEntry(I.key, I.kind, m);
       if (!e) continue;
       // yaklaşan klipleri giriş karesinde beklet
-      const active = t >= c.start - EPS && t < c.start + c.duration;
-      const inLayer = layers.some((L) => L.clip && L.clip.id === c.id);
-      const s0 = srcTimeAt(c, c.start, m);
-      if (!active && !inLayer && e.el.paused && Math.abs(e.el.currentTime - s0) > 0.05 && e.el.readyState >= 1) e.el.currentTime = s0;
+      if (!I.active && e.el.paused && e.el.readyState >= 1) {
+        const s0 = srcTimeAt(c, Math.max(c.start, Math.min(I.t, c.start + c.duration)), m);
+        if (Math.abs(e.el.currentTime - s0) > 0.05) e.el.currentTime = s0;
+      }
     }
     for (const id of [...this.pool.keys()]) if (!keep.has(id)) this.release(id);
     return keep;
@@ -209,56 +203,45 @@ export class Player {
     const P = store.project;
     const mm = this.mediaMap();
     const layers = layersAt(P, t, mm);
-    this.syncPool(t, layers, mm);
+    const insts = collectInstances(P, t, LOOKAHEAD);
+    this.syncPool(insts, mm);
     const fps = P.settings.fps;
+    const live = new Set();
 
-    // video öğelerini zamanla
-    const activeVideo = new Set();
-    for (const L of layers) {
-      if (!L.clip || L.clip.type !== 'media') continue;
-      const m = mm.get(L.clip.mediaId);
-      if (!m || m.kind !== 'video') continue;
-      const e = this.pool.get(L.clip.id);
-      if (!e) continue;
-      activeVideo.add(L.clip.id);
-      if (L.clip.reverse && playing) {
-        // ters oynatma: video öğesi geriye oynayamaz; kareler pencereli çözücüden gelir
-        if (!e.el.paused) e.el.pause();
-        if (!e.rev) { e.rev = new WindowSource(m.url, { maxW: 640, win: 1, keep: 3 }); }
-        e.rev.prefetch(L.srcTime);
-      } else this.syncElement(e, L.srcTime, speedAt(L.clip, t), playing, fps);
-    }
-    // ses klipleri
-    const tracks = store.audioTracks();
-    const solo = tracks.some((tr) => tr.solo);
-    for (const c of P.clips) {
-      const e = this.pool.get(c.id);
-      if (!e) continue;
-      if (e.kind === 'video') { if (!activeVideo.has(c.id) && !e.el.paused) e.el.pause(); continue; }
-      const tr = store.track(c.trackId);
-      const active = t >= c.start - EPS && t < c.start + c.duration - EPS;
-      const remap = isRemapped(c);
-      if (active && this._prerolling && !remap) {
-        // ön hazırlık: ses öğesini başlangıç konumuna getir (duraklatılmış)
-        this.syncElement(e, srcTimeAt(c, t, mm.get(c.mediaId)), c.speed, false, fps);
+    for (const I of insts) {
+      const c = I.clip;
+      const e = this.pool.get(I.key);
+      if (!e || !I.active) continue;
+      const m = mm.get(c.mediaId);
+      live.add(I.key);
+      if (I.kind === 'video') {
+        if (c.reverse && playing) {
+          // ters oynatma: video öğesi geriye oynayamaz; kareler pencereli çözücüden gelir
+          if (!e.el.paused) e.el.pause();
+          if (!e.rev) e.rev = new WindowSource(m.url, { maxW: 640, win: 1, keep: 3 });
+          e.rev.prefetch(srcTimeAt(c, I.t, m));
+        } else this.syncElement(e, srcTimeAt(c, I.t, m), speedAt(c, I.t), playing, fps);
         continue;
       }
-      if (!active || !playing) { if (!e.el.paused) e.el.pause(); this.stopBaked(e); continue; }
-      const m = mm.get(c.mediaId);
-      let g = audioGain(c, t) * (tr.volume ?? 1) * (P.master ?? 1);
-      if (tr.muted || (solo && !tr.solo)) g = 0;
+      // ses
+      const remap = isRemapped(c);
+      if (this._prerolling && !remap) { this.syncElement(e, srcTimeAt(c, I.t, m), c.speed, false, fps); continue; }
+      if (!playing) { if (!e.el.paused) e.el.pause(); this.stopBaked(e); continue; }
+      const g = audioGain(c, I.t) * I.gain * (P.master ?? 1);
       if (e.gain) e.gain.gain.setTargetAtTime(g, this.audioCtx.currentTime, 0.015);
       else e.el.volume = clamp(g, 0, 1);
       this.applyAfx(e, c.afx);
       if (remap) {
         // hız rampası / ters: önceden hesaplanmış ses tamponu çalınır
         if (!e.el.paused) e.el.pause();
-        this.playBaked(e, c, m, t - c.start);
+        this.playBaked(e, c, m, I.t - c.start);
       } else {
         this.stopBaked(e);
-        this.syncElement(e, srcTimeAt(c, t, m), c.speed, true, fps, 0.12);
+        this.syncElement(e, srcTimeAt(c, I.t, m), c.speed, true, fps, 0.12);
       }
     }
+    // etkin olmayan öğeleri durdur
+    for (const [key, e] of this.pool) if (!live.has(key)) { if (!e.el.paused) e.el.pause(); this.stopBaked(e); }
 
     // Yeni yüklenen bir video henüz kare vermediyse siyah kare yerine önceki kareyi koru
     const waiting = layers.some((L) => {
@@ -284,7 +267,7 @@ export class Player {
       const m = mm.get(L.clip.mediaId);
       if (!m || m.offline) return { offline: true };
       if (m.kind === 'image') { const img = this.image(m); return img.complete && img.naturalWidth ? { el: img, w: img.naturalWidth, h: img.naturalHeight } : null; }
-      const e = this.pool.get(L.clip.id);
+      const e = this.pool.get(L.poolKey || L.clip.id);
       if (e && e.rev && playing && L.clip.reverse) {
         const fc = e.rev.frameAt(L.srcTime);
         if (fc) return { el: fc, w: fc.width, h: fc.height };
@@ -349,10 +332,7 @@ export class Player {
     try { this.renderAt(store.playhead, false); } finally { this._prerolling = false; }
     const startAt = store.playhead;
     const tStart = performance.now();
-    const active = [...this.pool.entries()].filter(([id]) => {
-      const c = store.clip(id);
-      return c && startAt >= c.start - EPS && startAt < c.start + c.duration;
-    }).map(([, e]) => e);
+    const active = collectInstances(store.project, startAt, 0).filter((I) => I.active).map((I) => this.pool.get(I.key)).filter(Boolean);
     const go = () => {
       if (!this.playing) return;
       const ready = active.every((e) => e.el.readyState >= 3 && !e.el.seeking);
